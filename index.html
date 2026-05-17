@@ -2,15 +2,13 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Australia state selector</title>
+  <title>Exposure Tool – States + Hospitals</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <!-- Leaflet CSS -->
   <link
     rel="stylesheet"
     href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-    crossorigin=""
   />
 
   <!-- Leaflet.draw CSS -->
@@ -20,127 +18,125 @@
   />
 
   <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-    }
-    #map {
-      width: 100%;
-      height: 100%;
+    html, body { height: 100%; margin: 0; }
+    #map { width: 100%; height: 100%; }
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 10px 15px;
+      border-radius: 6px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.3);
+      font-family: Arial, sans-serif;
+      z-index: 999;
     }
   </style>
 </head>
 <body>
+
+<div id="info">
+  <b>Exposure Summary</b><br>
+  States selected: <span id="stateCount">0</span><br>
+  Hospitals selected: <span id="hospitalCount">0</span>
+</div>
+
 <div id="map"></div>
 
 <!-- Leaflet JS -->
-<script
-  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-  crossorigin=""
-></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <!-- Leaflet.draw JS -->
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 
-<!-- Turf.js for geometry intersection -->
+<!-- Turf.js -->
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
 <script>
-// --- 1. Basic map setup over Australia ---
+// ------------------------------------------------------------
+// 1. MAP SETUP
+// ------------------------------------------------------------
 var map = L.map('map').setView([-25, 135], 4);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 18,
-  attribution: '&copy; OpenStreetMap contributors'
+  maxZoom: 18
 }).addTo(map);
 
-// --- 2. Simple GeoJSON for Australian states/territories ---
-// This is just an example; replace with a proper GeoJSON if you have one.
+// ------------------------------------------------------------
+// 2. AUSTRALIAN STATES (simple polygons for demo)
+// ------------------------------------------------------------
 var ausStatesGeoJSON = {
   "type": "FeatureCollection",
   "features": [
-    {
-      "type": "Feature",
-      "properties": { "name": "New South Wales" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[141,-28],[153.6,-28],[153.6,-37.5],[141,-37.5],[141,-28]]]
-      }
+    { "type": "Feature", "properties": { "name": "New South Wales" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[141,-28],[153.6,-28],[153.6,-37.5],[141,-37.5],[141,-28]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "Victoria" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[141,-34],[150,-34],[150,-39.2],[141,-39.2],[141,-34]]]
-      }
+    { "type": "Feature", "properties": { "name": "Victoria" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[141,-34],[150,-34],[150,-39.2],[141,-39.2],[141,-34]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "Queensland" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[138,-10],[154,-10],[154,-29],[138,-29],[138,-10]]]
-      }
+    { "type": "Feature", "properties": { "name": "Queensland" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[138,-10],[154,-10],[154,-29],[138,-29],[138,-10]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "South Australia" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[129,-26],[141,-26],[141,-38],[129,-38],[129,-26]]]
-      }
+    { "type": "Feature", "properties": { "name": "South Australia" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[129,-26],[141,-26],[141,-38],[129,-38],[129,-26]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "Western Australia" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[112,-14],[129,-14],[129,-35],[112,-35],[112,-14]]]
-      }
+    { "type": "Feature", "properties": { "name": "Western Australia" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[112,-14],[129,-14],[129,-35],[112,-35],[112,-14]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "Tasmania" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[144,-40],[149,-40],[149,-44],[144,-44],[144,-40]]]
-      }
+    { "type": "Feature", "properties": { "name": "Tasmania" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[144,-40],[149,-40],[149,-44],[144,-44],[144,-40]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "Northern Territory" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[129,-11],[138,-11],[138,-26],[129,-26],[129,-11]]]
-      }
+    { "type": "Feature", "properties": { "name": "Northern Territory" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[129,-11],[138,-11],[138,-26],[129,-26],[129,-11]]] }
     },
-    {
-      "type": "Feature",
-      "properties": { "name": "Australian Capital Territory" },
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [[[148.8,-35.1],[149.4,-35.1],[149.4,-35.8],[148.8,-35.8],[148.8,-35.1]]]
-      }
+    { "type": "Feature", "properties": { "name": "Australian Capital Territory" },
+      "geometry": { "type": "Polygon",
+        "coordinates": [[[148.8,-35.1],[149.4,-35.1],[149.4,-35.8],[148.8,-35.8],[148.8,-35.1]]] }
     }
   ]
 };
 
-// Add states to map
 var statesLayer = L.geoJSON(ausStatesGeoJSON, {
   style: {
     color: '#555',
     weight: 1,
     fillColor: '#3388ff',
     fillOpacity: 0.2
-  },
-  onEachFeature: function (feature, layer) {
-    layer.bindPopup(feature.properties.name);
   }
 }).addTo(map);
 
-// --- 3. Drawing control setup ---
+// ------------------------------------------------------------
+// 3. LOAD HOSPITALS FROM DIGITAL ATLAS API
+// ------------------------------------------------------------
+let hospitalsLayer;
+
+fetch("https://digital.atlas.gov.au/api/feature-server/datasets/declared_public_hospitals/FeatureServer/0/query?where=1=1&outFields=*&f=geojson")
+  .then(res => res.json())
+  .then(data => {
+    hospitalsLayer = L.geoJSON(data, {
+      pointToLayer: (feature, latlng) =>
+        L.circleMarker(latlng, {
+          radius: 6,
+          color: "#d40000",
+          fillColor: "#ff4d4d",
+          fillOpacity: 0.8
+        }),
+      onEachFeature: (feature, layer) => {
+        layer.bindPopup(`<b>${feature.properties.hospital_name}</b>`);
+      }
+    }).addTo(map);
+  });
+
+// ------------------------------------------------------------
+// 4. DRAWING TOOLS
+// ------------------------------------------------------------
 var drawnItems = new L.FeatureGroup();
 map.addLayer(drawnItems);
 
@@ -153,37 +149,51 @@ var drawControl = new L.Control.Draw({
     marker: false,
     circlemarker: false
   },
-  edit: {
-    featureGroup: drawnItems
-  }
+  edit: { featureGroup: drawnItems }
 });
 map.addControl(drawControl);
 
-// --- 4. When a shape is drawn, count intersecting states ---
+// ------------------------------------------------------------
+// 5. ANALYSIS WHEN SHAPE IS DRAWN
+// ------------------------------------------------------------
 map.on(L.Draw.Event.CREATED, function (e) {
-  drawnItems.clearLayers(); // keep only one shape at a time
+  drawnItems.clearLayers();
   var layer = e.layer;
   drawnItems.addLayer(layer);
 
   var drawnGeoJSON = layer.toGeoJSON();
-  var selectedCount = 0;
-  var selectedNames = [];
 
-  statesLayer.eachLayer(function (stateLayer) {
-    var stateGeoJSON = stateLayer.toGeoJSON();
-    // Use Turf to test intersection
-    var intersects = turf.booleanIntersects(drawnGeoJSON, stateGeoJSON);
-    if (intersects) {
-      selectedCount++;
-      selectedNames.push(stateGeoJSON.properties.name);
-      stateLayer.setStyle({ fillColor: '#ff7800', fillOpacity: 0.5 });
+  // ---- Count states ----
+  var stateCount = 0;
+  statesLayer.eachLayer(function (s) {
+    var stateGeo = s.toGeoJSON();
+    if (turf.booleanIntersects(drawnGeoJSON, stateGeo)) {
+      stateCount++;
+      s.setStyle({ fillColor: '#ff7800', fillOpacity: 0.5 });
     } else {
-      stateLayer.setStyle({ fillColor: '#3388ff', fillOpacity: 0.2 });
+      s.setStyle({ fillColor: '#3388ff', fillOpacity: 0.2 });
     }
   });
 
-  alert('You selected ' + selectedCount + ' state(s):\n' + selectedNames.join(', '));
+  // ---- Count hospitals ----
+  var hospitalCount = 0;
+  if (hospitalsLayer) {
+    hospitalsLayer.eachLayer(function (h) {
+      var point = h.toGeoJSON();
+      if (turf.booleanPointInPolygon(point, drawnGeoJSON)) {
+        hospitalCount++;
+        h.setStyle({ color: "#00cc00", fillColor: "#00ff00" });
+      } else {
+        h.setStyle({ color: "#d40000", fillColor: "#ff4d4d" });
+      }
+    });
+  }
+
+  // Update UI panel
+  document.getElementById("stateCount").textContent = stateCount;
+  document.getElementById("hospitalCount").textContent = hospitalCount;
 });
 </script>
+
 </body>
 </html>
