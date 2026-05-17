@@ -1,199 +1,3417 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Exposure Tool – States + Hospitals</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Exposure Reporter </title>
 
-  <!-- Leaflet CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
-  <!-- Leaflet.draw CSS -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
-  />
+<!-- Leaflet.draw -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 
-  <style>
-    html, body { height: 100%; margin: 0; }
-    #map { width: 100%; height: 100%; }
-    #info {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: white;
-      padding: 10px 15px;
-      border-radius: 6px;
-      box-shadow: 0 0 8px rgba(0,0,0,0.3);
-      font-family: Arial, sans-serif;
-      z-index: 999;
-    }
-  </style>
+<!-- Turf.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+
+<!-- shpjs (shapefile) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/shpjs/3.6.3/shp.min.js"></script>
+
+<!-- togeojson (KML) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
+
+<!-- shp-write (shapefile export) -->
+<script src="https://unpkg.com/shp-write@0.3.2/shpwrite.js"></script>
+
+<!-- JSZip (for reliable zip creation) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<!-- polylabel (pole of inaccessibility for label placement) -->
+<script src="https://unpkg.com/polylabel@2.0.1/dist/polylabel.umd.js"></script>
+
+<!-- proj4 (coordinate reprojection for EPSG:9473 area calculations) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+
+<!-- rbush (spatial index for fast point-in-polygon LGA lookup) -->
+<script src="https://unpkg.com/rbush@3.0.1/rbush.min.js"></script>
+
+<style>
+  :root {
+    /* Primary */
+    --primary:       #003E5A;
+    --primary-70:    rgba(0,62,90,0.7);
+    --primary-45:    rgba(0,62,90,0.45);
+    --primary-20:    rgba(0,62,90,0.2);
+    --teal:          #00797A;
+    --teal-70:       rgba(0,121,122,0.7);
+    --teal-45:       rgba(0,121,122,0.45);
+    --teal-20:       rgba(0,121,122,0.2);
+    --white:         #ffffff;
+    --white-70:      rgba(255,255,255,0.7);
+    --white-45:      rgba(255,255,255,0.45);
+    --white-20:      rgba(255,255,255,0.2);
+
+    /* Secondary */
+    --blue:          #2d7592;
+    --amber:         #f2af00;
+    --orange:        #d47b22;
+    --red:           #b94527;
+    --cream:         #e8d4c1;
+    --mint:          #89ccb5;
+    --dark-teal:     #005260;
+
+    /* Chart / table */
+    --chart-bg:      #f1f2f2;
+
+    /* UI aliases */
+    --bg:            #003E5A;
+    --surface:       #003E5A;
+    --border:        rgba(0,121,122,0.6);
+    --accent:        #89ccb5;
+    --accent2:       #f2af00;
+    --warn:          #f2af00;
+    --danger:        #b94527;
+    --text:          #ffffff;
+    --muted:         rgba(255,255,255,0.6);
+    --panel-w:       340px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Arial, sans-serif;
+    background: #F1F2F2;
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    flex-shrink: 0;
+    z-index: 1000;
+  }
+  header .logo {
+    font-family: Arial, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+  }
+  header .subtitle { font-size: 12px; color: var(--muted); }
+  header .spacer { flex: 1; }
+  .status-pill {
+    font-size: 11px;
+    font-family: Arial, monospace;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all 0.3s;
+  }
+  .status-pill.ready   { border-color: var(--accent2); color: var(--accent2); }
+  .status-pill.loading { border-color: var(--warn);    color: var(--warn); }
+  .status-pill.error   { border-color: var(--danger);  color: var(--danger); }
+
+  .workspace { display: flex; flex: 1; overflow: hidden; gap: 8px; min-height: 0; }
+
+  /* Left column — fixed width, splits into two panels vertically */
+  .side-column {
+    width: var(--panel-w);
+    min-width: var(--panel-w);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  /* Analysis panel — shrinks to fit content, never scrolls */
+  .analysis-panel {
+    flex: 0 0 auto;
+    overflow: visible;
+    min-height: 0;
+  }
+  .analysis-panel .panel-scroll {
+    overflow: visible;
+    flex: none;
+  }
+
+  /* Results panel — fills remaining vertical space, scrolls inside */
+  .results-panel {
+    flex: 1 1 0;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  /* Narrower history panel sits beside the main panel */
+  .history-panel {
+    width: 220px;
+    min-width: 220px;
+  }
+  .panel-scroll {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-section:last-child { border-bottom: none; }
+
+  .section-label {
+    font-family: Arial, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .layer-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 13px; }
+  .layer-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .layer-name { flex: 1; color: var(--text); font-size: 12px; }
+  .layer-count { font-family: Arial, monospace; font-size: 10px; color: var(--muted); min-width: 48px; text-align: right; }
+
+  .toggle { position: relative; width: 28px; height: 16px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: var(--border); border-radius: 8px; cursor: pointer; transition: background 0.2s;
+  }
+  .toggle-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; background: var(--muted); border-radius: 50%;
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle input:checked + .toggle-track { background: var(--accent); }
+  .toggle input:checked + .toggle-track::after { transform: translateX(12px); background: #fff; }
+
+  /* AOI Tabs */
+  .aoi-tabs {
+    display: flex;
+    border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 12px;
+  }
+  .aoi-tab {
+    flex: 1; padding: 7px 10px;
+    font-size: 12px; font-family: Arial, sans-serif; font-weight: 500;
+    text-align: center; cursor: pointer;
+    background: transparent; border: none; border-right: 1px solid var(--border);
+    color: var(--muted); transition: all 0.15s;
+  }
+  .aoi-tab:last-child { border-right: none; }
+  .aoi-tab.active { background: var(--accent); color: #0d1117; }
+  .aoi-tab:not(.active):hover { background: rgba(88,166,255,0.08); color: var(--accent); }
+
+  .aoi-pane { display: none; }
+  .aoi-pane.active { display: block; }
+
+  .draw-actions { display: flex; flex-direction: column; gap: 6px; }
+
+  /* Polygon list */
+  .poly-list-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-family: Arial, monospace;
+    padding: 5px 6px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 3px; cursor: default;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .poly-list-item:hover { background: rgba(242,175,0,0.08); border-color: #f2af00; }
+  .poly-source { color: #f2af00; font-size: 12px; flex-shrink: 0; width: 14px; text-align: center; }
+  .poly-info { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .poly-num  { color: var(--text); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .poly-area { color: var(--muted); font-size: 10px; }
+  .poly-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .poly-edit-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    cursor: pointer; font-size: 11px; padding: 1px 5px; border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .poly-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .poly-del {
+    background: transparent; border: 1px solid var(--border); color: var(--danger);
+    cursor: pointer; font-size: 11px; padding: 1px 5px; border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .poly-del:hover { background: rgba(248,81,73,0.1); border-color: var(--danger); }
+  .poly-list-header {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; font-family: Arial, monospace; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .poly-list-header .poly-remove-all {
+    color: var(--danger); cursor: pointer; font-size: 10px;
+    background: none; border: none; padding: 0;
+  }
+  .poly-list-header .poly-remove-all:hover { opacity: 0.7; }
+
+  /* Polygon map label */
+  .poly-map-label {
+    background: rgba(13,17,23,0.75) !important;
+    border: 1px solid #f2af00 !important;
+    border-radius: 4px !important;
+    box-shadow: none !important;
+    color: #f2af00 !important;
+    font-family: Arial, sans-serif !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    padding: 2px 6px !important;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .poly-map-label::before { display: none !important; }
+
+  .draw-hint {
+    font-size: 11px; color: var(--muted); line-height: 1.5;
+    padding: 8px 10px; margin-top: 8px;
+    background: rgba(88,166,255,0.05); border: 1px solid rgba(88,166,255,0.15); border-radius: 6px;
+    display: none;
+  }
+  .draw-hint.visible { display: block; }
+
+  .draw-mode-indicator {
+    display: none; align-items: center; gap: 6px;
+    padding: 6px 10px; margin-top: 8px;
+    background: rgba(63,185,80,0.08); border: 1px solid rgba(63,185,80,0.3); border-radius: 6px;
+    font-size: 11px; color: #f2af00; font-family: Arial, monospace;
+  }
+  .draw-mode-indicator.visible { display: flex; }
+  .draw-pulse {
+    width: 7px; height: 7px; background: #f2af00; border-radius: 50%; flex-shrink: 0;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:0.4; transform:scale(0.7); }
+  }
+
+  .upload-zone {
+    border: 1.5px dashed var(--border); border-radius: 8px;
+    padding: 16px; text-align: center; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    font-size: 12px; color: var(--muted); position: relative;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent); background: rgba(88,166,255,0.05); color: var(--accent);
+  }
+  .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-zone .upload-icon { font-size: 22px; margin-bottom: 4px; }
+  .upload-zone .upload-hint { font-size: 10px; margin-top: 4px; color: var(--border); }
+
+  .aoi-badge {
+    margin-top: 8px; font-size: 11px; font-family: Arial, monospace;
+    color: #f2af00; padding: 4px 8px;
+    background: rgba(63,185,80,0.08); border-radius: 4px;
+    display: none; word-break: break-all;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px 14px; border-radius: 6px; border: none;
+    font-family: Arial, sans-serif; font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: all 0.15s; width: 100%;
+  }
+  .btn-primary { background: var(--accent); color: #0d1117; }
+  .btn-primary:hover { background: var(--mint); }
+  .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-warn { background: transparent; border: 1px solid var(--warn); color: var(--warn); }
+  .btn-warn:hover { background: rgba(210,153,34,0.1); }
+  .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+  .btn-danger:hover { background: rgba(248,81,73,0.1); }
+
+  .progress-bar { height: 3px; background: var(--border); border-radius: 2px; margin-top: 8px; overflow: hidden; display: none; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; width: 0%; }
+  .progress-label { font-size: 10px; font-family: Arial, monospace; color: var(--muted); margin-top: 4px; display: none; }
+
+  /* History entries */
+  .history-entry {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .history-entry:hover { border-color: var(--accent); background: rgba(88,166,255,0.06); }
+  .history-entry.active { border-color: var(--accent); }
+  .history-entry .h-num {
+    font-size: 10px; font-family: Arial, monospace;
+    color: var(--accent); font-weight: 700;
+    background: rgba(88,166,255,0.12);
+    border-radius: 3px; padding: 1px 5px;
+    flex-shrink: 0;
+  }
+  .history-entry .h-info { flex: 1; min-width: 0; }
+  .history-entry .h-time { font-size: 10px; color: var(--muted); font-family: Arial, monospace; }
+  .history-entry .h-summary { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* User data layers */
+  .user-layer-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 6px; margin-bottom: 3px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    font-size: 11px; font-family: Arial, sans-serif;
+  }
+  .user-layer-swatch {
+    width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0;
+    cursor: pointer; border: 1px solid rgba(255,255,255,0.15);
+    position: relative;
+  }
+  .user-layer-swatch input[type=color] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; padding: 0; border: none;
+  }
+  .user-layer-name { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-layer-count { font-size: 10px; color: var(--muted); font-family: Arial, monospace; flex-shrink: 0; }
+  .user-layer-actions { display: flex; gap: 3px; flex-shrink: 0; }
+  .user-layer-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    cursor: pointer; font-size: 10px; padding: 1px 4px; border-radius: 3px; transition: all 0.15s;
+  }
+  .user-layer-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .user-layer-btn.remove:hover { border-color: var(--danger); color: var(--danger); }
+  /* LGA click popup */
+  .leaflet-popup-content-wrapper {
+    background: #fff !important;
+    border-radius: 6px !important;
+    box-shadow: 0 3px 16px rgba(0,0,0,0.4) !important;
+  }
+  .leaflet-popup-tip { background: #fff !important; }
+  .leaflet-popup-content { margin: 10px 12px !important; }
+
+  /* Map legend */
+  .map-legend {
+    position: absolute;
+    bottom: 70px; left: 12px;
+    z-index: 900;
+    background: #F1F2F2;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 190px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    overflow: hidden;
+    padding: 8px;
+  }
+  .map-legend-header { display: none; }
+  .map-legend-body { padding: 0; }
+  .legend-row {
+    display: flex; align-items: center; gap: 7px;
+    padding: 3px 2px;
+  }
+  .legend-sym { width: 16px; height: 12px; flex-shrink: 0; }
+  .legend-lbl { flex: 1; color: #1a1a2e; font-family: Arial, sans-serif; font-size: 11px; }
+  .legend-toggle { transform: scale(0.85); transform-origin: right center; }
+
+  /* Add Data map overlay — bottom left, above legend */
+  .map-add-data {
+    position: absolute;
+    bottom: 12px; left: 12px;
+    z-index: 900;
+    background: #F1F2F2;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    min-width: 190px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    overflow: hidden;
+  }
+  .add-data-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+    font-size: 11px; font-family: Arial, monospace; font-weight: 700;
+    color: #1a1a2e; cursor: pointer; user-select: none;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+  }
+  .add-data-header:hover { background: rgba(0,0,0,0.04); }
+  .add-data-body { padding: 6px 8px 8px; }
+
+  /* Basemap switcher — bottom right, beside console */
+  .basemap-toggle {
+    position: absolute;
+    bottom: 28px; right: 120px;
+    z-index: 900;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-family: Arial, monospace;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .basemap-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  .basemap-picker {
+    position: absolute;
+    bottom: 64px; right: 120px;
+    z-index: 900;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    width: 280px;
+    display: none;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .basemap-picker.open { display: block; }
+  .basemap-picker-title {
+    font-family: Arial, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .basemap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .basemap-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    border-radius: 6px;
+    padding: 4px;
+    border: 2px solid transparent;
+    transition: border-color 0.15s;
+  }
+  .basemap-item:hover { border-color: var(--accent); }
+  .basemap-item.active { border-color: #f2af00; }
+  .basemap-thumb {
+    width: 100%;
+    aspect-ratio: 4/3;
+    border-radius: 4px;
+    background: var(--bg);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+  .basemap-thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover; border-radius: 4px;
+  }
+  .basemap-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-align: center;
+    font-family: Arial, sans-serif;
+    line-height: 1.2;
+  }
+  .basemap-item.active .basemap-label { color: #f2af00; }
+  .console-toggle {
+    position: absolute;
+    bottom: 28px; right: 12px;
+    z-index: 900;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-family: Arial, monospace;
+    color: var(--muted);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    transition: border-color 0.2s, color 0.2s;
+    user-select: none;
+  }
+  .console-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .console-toggle .log-badge {
+    background: var(--danger);
+    color: var(--primary);
+    border-radius: 10px;
+    font-size: 9px;
+    padding: 1px 5px;
+    display: none;
+  }
+  .console-toggle .log-badge.visible { display: inline-block; }
+
+  .console-float {
+    position: absolute;
+    bottom: 64px; right: 12px;
+    width: 380px; height: 220px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    z-index: 900;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  .console-float.open { display: flex; }
+  .console-float-header {
+    display: flex; align-items: center;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .console-float-title {
+    font-family: Arial, monospace;
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 0.1em; color: var(--muted);
+    text-transform: uppercase; flex: 1;
+  }
+  .console-clear {
+    font-size: 10px; font-family: Arial, monospace;
+    color: var(--muted); cursor: pointer; padding: 2px 6px;
+    border-radius: 4px; border: 1px solid transparent;
+    background: transparent;
+    transition: all 0.15s;
+  }
+  .console-clear:hover { border-color: var(--border); color: var(--text); }
+  .log-scroll { flex: 1; overflow-y: auto; padding: 6px 12px 8px; font-family: Arial, monospace; font-size: 10px; line-height: 1.6; }
+  .log-entry { margin-bottom: 2px; }
+  .log-entry.info  { color: var(--muted); }
+  .log-entry.ok    { color: var(--accent2); }
+  .log-entry.warn  { color: var(--warn); }
+  .log-entry.error { color: var(--danger); }
+  .log-entry .ts   { color: var(--border); margin-right: 4px; }
+  .log-entry { margin-bottom: 2px; }
+  .log-entry.info  { color: var(--muted); }
+  .log-entry.ok    { color: var(--accent2); }
+  .log-entry.warn  { color: var(--warn); }
+  .log-entry.error { color: var(--danger); }
+  .log-entry .ts   { color: var(--border); margin-right: 4px; }
+
+  /* Map */
+  .map-wrap { flex: 1; position: relative; border-radius: 10px; overflow: hidden; border: 1px solid #003E5A; }
+  #map { width: 100%; height: 100%; background: var(--chart-bg); }
+
+  /* Floating AOI confirmation bar */
+  .aoi-confirm-bar {
+    position: absolute;
+    bottom: 28px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid #f2af00; border-radius: 8px;
+    padding: 10px 16px;
+    display: none; align-items: center; gap: 12px;
+    z-index: 800; box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    font-size: 13px; white-space: nowrap;
+  }
+  .aoi-confirm-bar.visible { display: flex; }
+  .aoi-confirm-label { color: #f2af00; font-weight: 500; }
+  .aoi-confirm-meta  { color: var(--muted); font-size: 11px; font-family: Arial, monospace; }
+
+  /* Leaflet draw overrides */
+  .leaflet-draw-tooltip {
+    background: var(--surface) !important; border: 1px solid var(--border) !important;
+    color: var(--text) !important; font-family: Arial, monospace !important;
+    font-size: 11px !important; border-radius: 4px !important;
+  }
+  .leaflet-draw-tooltip:before { display: none !important; }
+  .leaflet-draw-toolbar a { background-color: var(--surface) !important; border-color: var(--border) !important; }
+  .leaflet-draw-toolbar a:hover { background-color: var(--bg) !important; }
+  .leaflet-draw-actions a { background-color: var(--surface) !important; color: var(--text) !important; border-color: var(--border) !important; }
+  .leaflet-draw-actions a:hover { background-color: var(--accent) !important; color: #0d1117 !important; }
+
+  /* Leaflet general */
+  .leaflet-container { background: var(--chart-bg) !important; }
+  .leaflet-control-zoom a, .leaflet-control-home a, .leaflet-control-refresh a {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+  }
+  .leaflet-control-zoom a:hover, .leaflet-control-home a:hover, .leaflet-control-refresh a:hover { background: var(--bg) !important; }
+  .leaflet-control-home    { margin-top: 5px !important; }
+  .leaflet-control-refresh { margin-top: 5px !important; }
+  .leaflet-control-attribution { background: rgba(13,17,23,0.8) !important; color: var(--muted) !important; font-size: 10px !important; }
+  .leaflet-control-attribution a { color: var(--accent) !important; }
+
+  /* LGA Search */
+  .lga-search-wrap {
+    position: absolute;
+    top: 12px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 900;
+    width: 280px;
+  }
+  .lga-search-box {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .lga-search-box:focus-within {
+    border-color: var(--accent);
+  }
+  .lga-search-icon {
+    color: var(--muted);
+    font-size: 15px;
+    margin-right: 6px;
+    flex-shrink: 0;
+  }
+  .lga-search-box input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    padding: 8px 0;
+  }
+  .lga-search-box input::placeholder { color: var(--muted); }
+  .lga-search-clear {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 4px;
+    flex-shrink: 0;
+  }
+  .lga-search-clear:hover { color: var(--text); }
+  .lga-search-results {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    max-height: 220px;
+    overflow-y: auto;
+    display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+  .lga-search-results.open { display: block; }
+  .lga-result-item {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: Arial, sans-serif;
+    cursor: pointer;
+    color: var(--text);
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .lga-result-item:last-child { border-bottom: none; }
+  .lga-result-item:hover, .lga-result-item.active {
+    background: rgba(88,166,255,0.1);
+    color: var(--accent);
+  }
+  .lga-result-state {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: Arial, monospace;
+  }
+  .lga-result-item.active .lga-result-state { color: var(--accent); opacity: 0.7; }
+  .lga-label {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--teal);
+    text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;
+    white-space: nowrap;
+    pointer-events: none;
+    text-align: center;
+    transform: translate(-50%, -50%);
+  }
+  .lga-label::before { display: none !important; }
+  .lga-label .leaflet-tooltip-content { text-align: center; }
+
+  /* STE permanent labels */
+  .ste-label {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    font-family: Arial, sans-serif;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--primary);
+    text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;
+    white-space: nowrap;
+    pointer-events: none;
+    text-align: center;
+    transform: translate(-50%, -50%);
+    letter-spacing: 0.04em;
+  }
+  .ste-label::before { display: none !important; }
+  .ste-label .leaflet-tooltip-content { text-align: center; }
+  .ste-label-act {
+    transform: translate(2px, -50%) !important;
+    padding-left: 2px !important;
+  }
+  .ste-label-act::before { display: none !important; }
+
+  /* Report modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 2000; display: none; align-items: center; justify-content: center; padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #f4f6f8; border: 1px solid #ccd0d5; border-radius: 10px;
+    width: 98%; max-width: 1200px; max-height: 95vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    color: #1a1a2e;
+  }
+  .modal-header { display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid #ccd0d5; gap: 10px; }
+  .modal-title { font-family: Arial, monospace; font-size: 13px; font-weight: 700; color: #003E5A; flex: 1; }
+  .modal-body { flex: 1; overflow-y: auto; padding: 20px; background: #f4f6f8; }
+  .modal-footer { display: flex; gap: 8px; padding: 14px 20px; border-top: 1px solid #ccd0d5; justify-content: space-between; align-items: center; background: #f4f6f8; }
+  .modal-footer-left { display: flex; gap: 8px; }
+
+  .report-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+  .meta-card { background: #fff; border: 1px solid #ccd0d5; border-radius: 6px; padding: 12px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .meta-card .val { font-family: Arial, monospace; font-size: 22px; font-weight: 700; color: #1a1a2e; }
+  .meta-card .lbl { font-size: 11px; color: #666; margin-top: 2px; }
+
+  .report-table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th {
+    font-family: Arial, monospace; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #003E5A;
+    padding: 8px 12px; text-align: center; background: #e8ecf0;
+    border-bottom: 1px solid #ccd0d5; cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  thead th:first-child { text-align: left; }
+  thead th:hover { color: #00797A; }
+  thead th .sort-icon { margin-left: 4px; opacity: 0.4; }
+  thead th.sorted .sort-icon { opacity: 1; color: #00797A; }
+  tbody tr { border-bottom: 1px solid #e0e4e8; transition: background 0.1s; }
+  tbody tr:hover { background: rgba(0,121,122,0.05); }
+  tbody td { padding: 8px 12px; vertical-align: middle; text-align: center; color: #1a1a2e; }
+  tbody td:first-child { text-align: left; }
+  td.num { font-family: Arial, monospace; text-align: center; color: #1a1a2e; }
+  td.lga-name { font-weight: 500; text-align: left; color: #1a1a2e; }
+  .bar-cell { width: 80px; }
+  .bar-wrap { background: #ccd0d5; border-radius: 2px; height: 4px; }
+  .bar-fill { height: 4px; border-radius: 2px; transition: width 0.4s; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
 </head>
 <body>
 
-<div id="info">
-  <b>Exposure Summary</b><br>
-  States selected: <span id="stateCount">0</span><br>
-  Hospitals selected: <span id="hospitalCount">0</span>
+<header>
+  <div class="logo">EXPOSURE REPORTER</div>
+  <div class="subtitle">an LGA Analysis</div>
+  <div class="spacer"></div>
+  <div class="status-pill" id="statusPill">IDLE</div>
+</header>
+
+<div class="workspace">
+
+  <!-- Left column: Analysis panel (content-fit) + Results panel (fills rest) -->
+  <div class="side-column">
+
+    <!-- Analysis Panel — shrinks to fit content -->
+    <div class="panel analysis-panel">
+      <div class="panel-scroll">
+
+        <!-- Hidden count trackers -->
+        <span id="countC" style="display:none"></span>
+        <span id="countD" style="display:none"></span>
+        <span id="countA" style="display:none"></span>
+        <span id="countB" style="display:none"></span>
+        <span id="countE" style="display:none"></span>
+        <span id="countF" style="display:none"></span>
+        <span id="countLGA" style="display:none"></span>
+        <span id="countSTE" style="display:none"></span>
+
+        <!-- AOI: Upload -->
+        <div class="panel-section">
+          <div class="section-label">⬆ Upload Area</div>
+          <div class="upload-zone" id="uploadZone"
+               ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+            <input type="file" id="fileInput" accept=".zip,.geojson,.json,.kml,.kmz" onchange="handleFileSelect(event)">
+            <div class="upload-icon">⬆</div>
+            <div>Drop file or click to browse</div>
+            <div class="upload-hint">GeoJSON · KML · Shapefile (.zip) — adds to AOI</div>
+          </div>
+        </div>
+
+        <!-- AOI: Draw -->
+        <div class="panel-section">
+          <div class="section-label">✏ Draw Area</div>
+          <div class="draw-actions">
+            <button class="btn btn-ghost" id="btnStartDraw" onclick="startDrawing()"
+                    style="border-color:#f2af00;color:#f2af00;font-size:12px">
+              ✏ Draw polygon on map
+            </button>
+            <button class="btn btn-ghost" id="btnCancelDraw" onclick="cancelDrawing()"
+                    style="display:none;font-size:12px;border-color:var(--danger);color:var(--danger)">
+              ✕ Cancel drawing
+            </button>
+          </div>
+          <div class="draw-mode-indicator" id="drawModeIndicator">
+            <div class="draw-pulse"></div>
+            <span id="drawModeLabel">Drawing…</span>
+          </div>
+          <div class="draw-hint" id="drawHint">
+            Click on the map to place vertices.<br>
+            Click the first point or press <kbd style="background:var(--border);padding:1px 4px;border-radius:3px;font-size:10px">Finish</kbd> to close.
+          </div>
+        </div>
+
+        <!-- AOI: Manage polygons -->
+        <div class="panel-section" id="aoiManageSection" style="display:none">
+          <div class="section-label">◈ Manage Polygons</div>
+          <div id="drawnPolyList"></div>
+          <div id="aoiBadge" class="aoi-badge" style="display:none"></div>
+        </div>
+
+        <!-- Analysis -->
+        <div class="panel-section">
+          <div class="section-label">Analysis</div>
+          <button class="btn btn-primary" id="runBtn" onclick="runAnalysis()" disabled>▶ Generate Report</button>
+          <div class="progress-bar" id="analysisProgress"><div class="progress-fill" id="analysisProgressFill"></div></div>
+          <div class="progress-label" id="analysisProgressLabel"></div>
+        </div>
+
+      </div><!-- /panel-scroll -->
+    </div><!-- /analysis-panel -->
+
+    <!-- Results Panel — always visible, fills remaining space, scrolls -->
+    <div class="panel results-panel">
+      <div class="panel-section" style="flex-shrink:0;border-bottom:1px solid var(--border)">
+        <div class="section-label" style="margin-bottom:0">Session History</div>
+      </div>
+      <div id="historyList" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;padding:10px 12px">
+        <div style="color:var(--muted);font-size:11px;font-style:italic;text-align:center;margin-top:12px;line-height:1.5">
+          Run an analysis to<br>see results here
+        </div>
+      </div>
+    </div><!-- /results-panel -->
+
+  </div><!-- /side-column -->
+
+  <!-- Map -->
+  <div class="map-wrap">
+    <div id="map"></div>
+
+    <!-- Bottom-left stack: legend + add data (flex column, grows upward) -->
+    <div style="position:absolute;bottom:12px;left:12px;z-index:900;display:flex;flex-direction:column-reverse;gap:5px;align-items:stretch;width:210px">
+
+      <!-- Map legend / layer toggle -->
+      <div class="map-legend" id="mapLegend" style="position:static;box-shadow:none">
+        <div class="map-legend-body" id="legendBody">
+          <div class="legend-row">
+            <div class="legend-sym" style="background:#2d7592;border-radius:50%"></div>
+            <span class="legend-lbl">Aged Care Services</span>
+            <label class="toggle legend-toggle"><input type="checkbox" id="toggleA" onchange="toggleLayer('A',this.checked)"><div class="toggle-track"></div></label>
+          </div>
+          <div class="legend-row">
+            <div class="legend-sym" style="background:#b94527;border-radius:50%"></div>
+            <span class="legend-lbl">Public Hospitals</span>
+            <label class="toggle legend-toggle"><input type="checkbox" id="toggleB" onchange="toggleLayer('B',this.checked)"><div class="toggle-track"></div></label>
+          </div>
+          <div class="legend-row">
+            <div class="legend-sym" style="background:#d47b22;border-radius:50%"></div>
+            <span class="legend-lbl">Private Hospitals</span>
+            <label class="toggle legend-toggle"><input type="checkbox" id="toggleE" onchange="toggleLayer('E',this.checked)"><div class="toggle-track"></div></label>
+          </div>
+          <div class="legend-row">
+            <div class="legend-sym" style="background:#f2af00;border-radius:50%"></div>
+            <span class="legend-lbl">Major Power Stations</span>
+            <label class="toggle legend-toggle"><input type="checkbox" id="toggleF" onchange="toggleLayer('F',this.checked)"><div class="toggle-track"></div></label>
+          </div>
+          <div class="legend-row">
+            <div class="legend-sym" style="height:2px;background:transparent;border-top:2px dashed #003E5A;margin-top:5px"></div>
+            <span class="legend-lbl">LGA Boundaries</span>
+            <label class="toggle legend-toggle"><input type="checkbox" id="toggleLGA" checked onchange="toggleLayer('LGA',this.checked)"><div class="toggle-track"></div></label>
+          </div>
+          <div class="legend-row">
+            <div class="legend-sym" style="height:2px;background:transparent;border-top:2px solid #00797A;margin-top:5px"></div>
+            <span class="legend-lbl">State / Territory</span>
+            <label class="toggle legend-toggle"><input type="checkbox" id="toggleSTE" checked onchange="toggleLayer('STE',this.checked)"><div class="toggle-track"></div></label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Data overlay -->
+      <div class="map-add-data" id="mapAddData" style="position:static;box-shadow:none">
+        <div class="add-data-header" onclick="toggleAddData()">
+          <span>+ Add Data</span>
+          <span id="addDataChevron" style="font-size:9px;transition:transform 0.2s;transform:rotate(180deg)">▲</span>
+        </div>
+        <div class="add-data-body" id="addDataBody" style="display:none">
+          <div class="upload-zone" id="userDataZone"
+               style="padding:10px;font-size:11px"
+               ondragover="onUserDataDragOver(event)"
+               ondragleave="onUserDataDragLeave()"
+               ondrop="onUserDataDrop(event)">
+            <input type="file" id="userDataInput" accept=".zip,.geojson,.json,.kml,.kmz"
+                   onchange="handleUserDataSelect(event)" multiple>
+            <div style="font-size:16px;margin-bottom:2px">+</div>
+            <div>Drop or browse</div>
+            <div class="upload-hint">GeoJSON · KML · SHP (.zip)</div>
+          </div>
+          <div id="userLayerList" style="margin-top:6px"></div>
+          <div style="margin-top:6px;font-size:9px;color:#888;line-height:1.4;font-style:italic">
+            Layers added here are for visual reference only and are not included in exposure analysis.
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /bottom-left stack -->
+
+    <!-- Basemap switcher — bottom right, next to console -->
+    <div class="basemap-toggle" id="basemapToggle" onclick="toggleBasemapPicker()">
+      ⊞ Basemap
+    </div>
+    <div class="basemap-picker" id="basemapPicker">
+      <div class="basemap-picker-title">Choose Basemap</div>
+      <div class="basemap-grid" id="basemapGrid"></div>
+    </div>
+
+    <!-- AOI confirmation bar -->
+    <div class="aoi-confirm-bar" id="aoiConfirmBar">
+      <span class="aoi-confirm-label">✓ AOI set</span>
+      <span class="aoi-confirm-meta" id="aoiConfirmMeta"></span>
+      <button class="btn btn-ghost" onclick="zoomToAOI()"
+              style="width:auto;padding:4px 10px;font-size:11px">⌖ Zoom to AOI</button>
+      <button class="btn btn-danger" onclick="clearAOI()"
+              style="width:auto;padding:4px 10px;font-size:11px">✕ Clear</button>
+    </div>
+
+    <!-- LGA Search -->
+    <div class="lga-search-wrap" id="lgaSearchWrap">
+      <div class="lga-search-box">
+        <span class="lga-search-icon">⌕</span>
+        <input type="text" id="lgaSearchInput" placeholder="Search LGA…"
+               oninput="onLGASearch(this.value)"
+               onkeydown="onLGASearchKey(event)"
+               autocomplete="off"/>
+        <button class="lga-search-clear" id="lgaSearchClear" onclick="clearLGASearch()" style="display:none">✕</button>
+      </div>
+      <div class="lga-search-results" id="lgaSearchResults"></div>
+    </div>
+
+    <!-- Floating console -->
+    <div class="console-float" id="consoleFloat">
+      <div class="console-float-header">
+        <span class="console-float-title">Console</span>
+        <button class="console-clear" onclick="clearConsole()">Clear</button>
+        <button class="console-clear" onclick="toggleConsole()" style="margin-left:4px">✕</button>
+      </div>
+      <div class="log-scroll" id="logScroll"></div>
+    </div>
+
+    <!-- Console toggle button -->
+    <div class="console-toggle" id="consoleToggle" onclick="toggleConsole()">
+      ⌨ Console
+      <span class="log-badge" id="logBadge">!</span>
+    </div>
+
+  </div>
+
+</div><!-- /workspace -->
+
+<!-- Report Modal -->
+<div class="modal-overlay" id="reportModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">ANALYSIS REPORT</div>
+      <div id="reportTimestamp" style="font-size:11px;color:var(--muted);font-family:Arial,monospace"></div>
+    </div>
+    <div class="modal-body" id="reportBody"></div>
+    <div class="modal-footer">
+      <div class="modal-footer-left">
+        <button class="btn btn-primary" onclick="exportCSV()" style="width:auto;padding:8px 18px">↓ Export CSV</button>
+        <button class="btn btn-primary" onclick="exportAOI()" style="width:auto;padding:8px 18px">↓ Export AOI (.zip)</button>
+      </div>
+      <button class="btn btn-primary" onclick="closeReport()" style="width:auto;padding:8px 18px">Close</button>
+    </div>
+  </div>
 </div>
 
-<div id="map"></div>
-
-<!-- Leaflet JS -->
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<!-- Leaflet.draw JS -->
-<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-
-<!-- Turf.js -->
-<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
-
 <script>
-// ------------------------------------------------------------
-// 1. MAP SETUP
-// ------------------------------------------------------------
-var map = L.map('map').setView([-25, 135], 4);
+// ═══════════════════════════════════════════════════════════
+// EPSG:9473 — GDA2020 / Australian Albers (equal-area)
+// All area calculations use this projection per project requirements
+// ═══════════════════════════════════════════════════════════
+proj4.defs('EPSG:9473',
+  '+proj=aea +lat_0=0 +lon_0=132 +lat_1=-18 +lat_2=-36 +x_0=0 +y_0=0 ' +
+  '+ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs'
+);
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 18
-}).addTo(map);
+// Shoelace formula for planar polygon area in m² on projected coordinates
+function ringArea(ring) {
+  let area = 0;
+  const n = ring.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    area += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
+  }
+  return Math.abs(area / 2);
+}
 
-// ------------------------------------------------------------
-// 2. AUSTRALIAN STATES (simple polygons for demo)
-// ------------------------------------------------------------
-var ausStatesGeoJSON = {
-  "type": "FeatureCollection",
-  "features": [
-    { "type": "Feature", "properties": { "name": "New South Wales" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[141,-28],[153.6,-28],[153.6,-37.5],[141,-37.5],[141,-28]]] }
+// Area of a projected polygon (outer ring minus holes)
+function polyArea(rings) {
+  if (!rings || rings.length === 0) return 0;
+  let area = ringArea(rings[0]);           // outer ring
+  for (let i = 1; i < rings.length; i++) { // subtract holes
+    area -= ringArea(rings[i]);
+  }
+  return Math.max(0, area);
+}
+
+// Reproject GeoJSON feature/geometry to EPSG:9473 and return planar area in m²
+function areaEPSG9473(geojsonFeatureOrGeometry) {
+  const geom = geojsonFeatureOrGeometry.geometry || geojsonFeatureOrGeometry;
+  const toAlbers = coord => proj4('EPSG:4326', 'EPSG:9473', [coord[0], coord[1]]);
+
+  function reprojectRing(ring)  { return ring.map(toAlbers); }
+  function reprojectPoly(poly)  { return poly.map(reprojectRing); }
+
+  if (geom.type === 'Polygon') {
+    return polyArea(reprojectPoly(geom.coordinates));
+  } else if (geom.type === 'MultiPolygon') {
+    return geom.coordinates.reduce((sum, poly) => sum + polyArea(reprojectPoly(poly)), 0);
+  }
+  return 0;
+}
+
+// Return area in sq km, rounded to integer
+function areaKm2(geojsonFeatureOrGeometry) {
+  return Math.round(areaEPSG9473(geojsonFeatureOrGeometry) / 1e6);
+}
+
+// ═══════════════════════════════════════════════════════════
+// CONFIG  — ArcGIS REST endpoints returning GeoJSON directly
+// ═══════════════════════════════════════════════════════════
+const CONFIG = {
+  layers: {
+    A: {
+      name:       'Aged Care Services',
+      url:        'https://services5.arcgis.com/OvOcYIrJnM97ABBA/arcgis/rest/services/Australian_Aged_Care_Services/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
+      color:      '#2d7592',
+      labelField: ['Service_Name','ServiceName','NAME','name'],
+      onDemand:   false
     },
-    { "type": "Feature", "properties": { "name": "Victoria" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[141,-34],[150,-34],[150,-39.2],[141,-39.2],[141,-34]]] }
+    B: {
+      name:       'Public Hospitals',
+      url:        'https://services5.arcgis.com/OvOcYIrJnM97ABBA/ArcGIS/rest/services/Declared_Public_Hospitals/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
+      color:      '#b94527',
+      labelField: ['Hospital_Name','HospitalName','NAME','name'],
+      onDemand:   false
     },
-    { "type": "Feature", "properties": { "name": "Queensland" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[138,-10],[154,-10],[154,-29],[138,-29],[138,-10]]] }
+    E: {
+      name:       'Private Hospitals',
+      url:        'https://services5.arcgis.com/OvOcYIrJnM97ABBA/ArcGIS/rest/services/Declared_Private_Hospitals/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
+      color:      '#d47b22',
+      labelField: ['Hospital_Name','HospitalName','NAME','name'],
+      onDemand:   false
     },
-    { "type": "Feature", "properties": { "name": "South Australia" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[129,-26],[141,-26],[141,-38],[129,-38],[129,-26]]] }
+    F: {
+      name:       'Major Power Stations',
+      url:        'https://services.ga.gov.au/gis/rest/services/National_Electricity_Infrastructure/MapServer/1/query?outFields=*&where=1%3D1&f=geojson',
+      color:      '#f2af00',
+      labelField: ['NAME','name','STATION_NAME','StationName','LABEL'],
+      onDemand:   false
     },
-    { "type": "Feature", "properties": { "name": "Western Australia" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[112,-14],[129,-14],[129,-35],[112,-35],[112,-14]]] }
+    C: {
+      name:       'Population (2025)',
+      url:        'https://services-ap1.arcgis.com/EiaPtTiEArHVnvWM/arcgis/rest/services/ABS%20Australian%20population%20Grid%20to%20Point%20-%202025/FeatureServer/0/query',
+      color:      '#d47b22',
+      popField:   'pop',
+      onDemand:   true
     },
-    { "type": "Feature", "properties": { "name": "Tasmania" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[144,-40],[149,-40],[149,-44],[144,-44],[144,-40]]] }
+    D: {
+      name:       'Address Points',
+      urlBase:    'https://services-ap1.arcgis.com/ypkPEy1AmwPKGNNv/arcgis/rest/services/national_address_points/FeatureServer/0/query',
+      color:      '#89ccb5',
+      labelField: ['address','ADDRESS','full_address','FULL_ADDRESS','site_name','SITE_NAME'],
+      onDemand:   true
     },
-    { "type": "Feature", "properties": { "name": "Northern Territory" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[129,-11],[138,-11],[138,-26],[129,-26],[129,-11]]] }
+    STE: {
+      name:      'State / Territory',
+      url:       'https://services-ap1.arcgis.com/EiaPtTiEArHVnvWM/arcgis/rest/services/Internal_State_Borders/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
+      color:     '#00797A',
+      nameField: ['ste_name_2021','STE_NAME_2021','state_name_2021','STATE_NAME_2021','STE_NAME21','STE_NAME','STATE_NAME','name','NAME']
     },
-    { "type": "Feature", "properties": { "name": "Australian Capital Territory" },
-      "geometry": { "type": "Polygon",
-        "coordinates": [[[148.8,-35.1],[149.4,-35.1],[149.4,-35.8],[148.8,-35.8],[148.8,-35.1]]] }
+    LGA: {
+      name:     'LGA Boundaries',
+      url:      'https://geo.abs.gov.au/arcgis/rest/services/ASGS2024/LGA/FeatureServer/0/query?outFields=*&where=1%3D1&f=geojson',
+      color:    '#89ccb5',
+      nameField: ['lga_name_2024','LGA_NAME_2024','LGA_NAME24','lga_name_2021','LGA_NAME_2021','LGA_NAME','lga_name','NAME','name']
     }
-  ]
+  }
 };
 
-var statesLayer = L.geoJSON(ausStatesGeoJSON, {
-  style: {
-    color: '#555',
-    weight: 1,
-    fillColor: '#3388ff',
-    fillOpacity: 0.2
-  }
-}).addTo(map);
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+const state = {
+  map:             null,
+  leafletLayers:   { A: null, B: null, E: null, F: null, C: null, D: null, LGA: null, STE: null },
+  geoData:         { A: null, B: null, E: null, F: null, C: null, D: null, LGA: null, STE: null },
+  lgaNameField:    null,
+  layersReady:     false,
+  aoi:             null,
+  aoiAnalysis:     null,
+  aoiRingIndex:    null,   // rbush index of individual AOI rings for tiled PIP
+  aoiLeafletLayer: null,
+  aoiSource:       null,
+  drawHandler:     null,
+  editHandler:     null,
+  drawnItems:      null,
+  polyCounter:     0,   // increments with each polygon drawn, never resets
+  userLayers:      [],  // user-added data layers
+  _highlightedLGA: null,
+  isDrawing:       false,
+  isEditing:       false,
+  reportData:      null,
+  sessionHistory:  [],   // array of { id, timestamp, label, reportData, sortCol, sortAsc }
+  activeHistoryId: null,
+  sortCol:         'lga',
+  sortAsc:         true
+};
 
-// ------------------------------------------------------------
-// 3. LOAD HOSPITALS FROM DIGITAL ATLAS API
-// ------------------------------------------------------------
-let hospitalsLayer;
-
-fetch("https://digital.atlas.gov.au/api/feature-server/datasets/declared_public_hospitals/FeatureServer/0/query?where=1=1&outFields=*&f=geojson")
-  .then(res => res.json())
-  .then(data => {
-    hospitalsLayer = L.geoJSON(data, {
-      pointToLayer: (feature, latlng) =>
-        L.circleMarker(latlng, {
-          radius: 6,
-          color: "#d40000",
-          fillColor: "#ff4d4d",
-          fillOpacity: 0.8
-        }),
-      onEachFeature: (feature, layer) => {
-        layer.bindPopup(`<b>${feature.properties.hospital_name}</b>`);
-      }
-    }).addTo(map);
+// ═══════════════════════════════════════════════════════════
+// MAP INIT
+// ═══════════════════════════════════════════════════════════
+function initMap() {
+  state.map = L.map('map', {
+    center:     [-25.5, 134],
+    zoom:       5,
+    minZoom:    5,
+    zoomControl: true,
+    maxBounds:  [[-47, 108], [-8, 160]],  // Australia bounding box
+    maxBoundsViscosity: 1.0               // hard lock — cannot pan outside
   });
+  // Basemap is applied by switchBasemap() called from initBasemapPicker() below
 
-// ------------------------------------------------------------
-// 4. DRAWING TOOLS
-// ------------------------------------------------------------
-var drawnItems = new L.FeatureGroup();
-map.addLayer(drawnItems);
-
-var drawControl = new L.Control.Draw({
-  draw: {
-    polyline: false,
-    rectangle: true,
-    polygon: true,
-    circle: false,
-    marker: false,
-    circlemarker: false
-  },
-  edit: { featureGroup: drawnItems }
-});
-map.addControl(drawControl);
-
-// ------------------------------------------------------------
-// 5. ANALYSIS WHEN SHAPE IS DRAWN
-// ------------------------------------------------------------
-map.on(L.Draw.Event.CREATED, function (e) {
-  drawnItems.clearLayers();
-  var layer = e.layer;
-  drawnItems.addLayer(layer);
-
-  var drawnGeoJSON = layer.toGeoJSON();
-
-  // ---- Count states ----
-  var stateCount = 0;
-  statesLayer.eachLayer(function (s) {
-    var stateGeo = s.toGeoJSON();
-    if (turf.booleanIntersects(drawnGeoJSON, stateGeo)) {
-      stateCount++;
-      s.setStyle({ fillColor: '#ff7800', fillOpacity: 0.5 });
-    } else {
-      s.setStyle({ fillColor: '#3388ff', fillOpacity: 0.2 });
+  // Home button — styled to match Leaflet zoom buttons
+  const HomeControl = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: () => {
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-home');
+      const btn = L.DomUtil.create('a', '', container);
+      btn.innerHTML = '⌂';
+      btn.title     = 'Zoom to Australia';
+      btn.href      = '#';
+      btn.setAttribute('role', 'button');
+      L.DomEvent.on(btn, 'click', L.DomEvent.stop);
+      L.DomEvent.on(btn, 'click', () => state.map.setView([-25.5, 134], 5));
+      return container;
     }
   });
+  new HomeControl().addTo(state.map);
 
-  // ---- Count hospitals ----
-  var hospitalCount = 0;
-  if (hospitalsLayer) {
-    hospitalsLayer.eachLayer(function (h) {
-      var point = h.toGeoJSON();
-      if (turf.booleanPointInPolygon(point, drawnGeoJSON)) {
-        hospitalCount++;
-        h.setStyle({ color: "#00cc00", fillColor: "#00ff00" });
-      } else {
-        h.setStyle({ color: "#d40000", fillColor: "#ff4d4d" });
+  // Map Refresh button — reloads layers without resetting map view
+  const RefreshControl = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: () => {
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-refresh');
+      const btn = L.DomUtil.create('a', '', container);
+      btn.innerHTML = '↻';
+      btn.title     = 'Refresh map layers';
+      btn.href      = '#';
+      btn.setAttribute('role', 'button');
+      btn.style.fontSize = '14px';
+      L.DomEvent.on(btn, 'click', L.DomEvent.stop);
+      L.DomEvent.on(btn, 'click', () => reloadLayers());
+      return container;
+    }
+  });
+  new RefreshControl().addTo(state.map);
+
+  // Custom panes to guarantee STE renders above LGA
+  state.map.createPane('lgaPane');
+  state.map.createPane('stePane');
+  state.map.getPane('lgaPane').style.zIndex = 350;
+  state.map.getPane('stePane').style.zIndex = 360;
+
+  state.drawnItems = new L.FeatureGroup().addTo(state.map);
+
+  state.drawHandler = new L.Draw.Polygon(state.map, {
+    shapeOptions: { color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' },
+    showArea: true,
+    allowIntersection: false
+  });
+
+  state.map.on(L.Draw.Event.CREATED,   onDrawCreated);
+  state.map.on(L.Draw.Event.DRAWSTART, () => { state.isDrawing = true;  showDrawMode('Drawing… click to place vertices'); });
+  state.map.on(L.Draw.Event.DRAWSTOP,  () => {
+    state.isDrawing = false;
+    hideDrawMode();
+    document.getElementById('btnCancelDraw').style.display = 'none';
+    const count = state.drawnItems.getLayers().length;
+    document.getElementById('btnStartDraw').style.display = '';
+    document.getElementById('btnStartDraw').textContent   = count > 0 ? '+ Add polygon' : '✏ Draw polygon on map';
+  });
+  state.map.on(L.Draw.Event.EDITSTART, () => { state.isEditing = true;  showDrawMode('Editing… drag vertices to adjust'); });
+  state.map.on(L.Draw.Event.EDITSTOP,  onEditStop);
+  state.map.on(L.Draw.Event.EDITED,    onEdited);
+
+  log('Map initialised', 'ok');
+
+  // ── Zoom-based layer visibility ──────────────────────────
+  // Zoom ≤ 6  → STE visible,  LGA + points hidden
+  // Zoom ≥ 7  → STE hidden,   LGA + points visible
+  const ZOOM_NATIONAL  = 6;  // max zoom to show state layer
+  const ZOOM_REGIONAL  = 7;  // min zoom to show LGA + points
+
+  function updateZoomVisibility() {
+    const z = state.map.getZoom();
+
+    // STE always visible at all zoom levels
+    if (state.leafletLayers.STE && !state.map.hasLayer(state.leafletLayers.STE)) {
+      state.map.addLayer(state.leafletLayers.STE);
+    }
+    // Update label visibility whenever zoom changes
+    if (state._updateSTELabels) state._updateSTELabels();
+
+    if (z <= ZOOM_NATIONAL) {
+      if (state.leafletLayers.LGA && state.map.hasLayer(state.leafletLayers.LGA))
+        state.map.removeLayer(state.leafletLayers.LGA);
+    } else {
+      // Load point layers on first zoom to regional scale
+      if (!state.pointLayersLoaded) {
+        state.pointLayersLoaded  = true;
+        state.pointLayersReady   = false;
+        // Disable run button while point layers load
+        document.getElementById('runBtn').disabled = true;
+        log('Loading point layers — analysis will enable when complete', 'info');
+        loadPointLayers().then(() => {
+          state.pointLayersReady = true;
+          // Re-enable run button only if AOI is also set
+          if (state.aoi && state.layersReady) {
+            document.getElementById('runBtn').disabled = false;
+          }
+        });
       }
+      if (state.leafletLayers.LGA && document.getElementById('toggleLGA')?.checked &&
+          !state.map.hasLayer(state.leafletLayers.LGA))
+        state.map.addLayer(state.leafletLayers.LGA);
+    }
+  }
+
+  state.map.on('zoomend', updateZoomVisibility);
+  state.updateZoomVisibility = updateZoomVisibility; // expose for use after layers load
+
+  initBasemapPicker();
+  loadAllLayers();
+}
+
+// ═══════════════════════════════════════════════════════════
+// USER DATA LAYERS
+// ═══════════════════════════════════════════════════════════
+const USER_LAYER_COLOURS = ['#e07b39','#a259d9','#3da5d9','#e05c5c','#5cb85c','#f0c040','#c0c0c0','#e87cc3'];
+state.userLayers = []; // { id, name, colour, visible, leafletLayer, featureCount }
+
+function onUserDataDragOver(e)  { e.preventDefault(); document.getElementById('userDataZone').classList.add('drag-over'); }
+function onUserDataDragLeave()  { document.getElementById('userDataZone').classList.remove('drag-over'); }
+function onUserDataDrop(e)      { e.preventDefault(); onUserDataDragLeave(); [...e.dataTransfer.files].forEach(processUserDataFile); }
+function handleUserDataSelect(e){ [...e.target.files].forEach(processUserDataFile); e.target.value = ''; }
+
+async function processUserDataFile(file) {
+  log(`Loading data: ${file.name}`, 'info');
+  try {
+    const ext = file.name.split('.').pop().toLowerCase();
+    let geojson;
+    if      (ext === 'zip')                      { geojson = await shp(await file.arrayBuffer()); }
+    else if (ext === 'kml' || ext === 'kmz')     { geojson = toGeoJSON.kml(new DOMParser().parseFromString(await file.text(), 'text/xml')); }
+    else if (ext === 'geojson' || ext === 'json'){ geojson = JSON.parse(await file.text()); }
+    else throw new Error(`Unsupported format: .${ext}`);
+
+    const name    = file.name.replace(/\.[^.]+$/, '');
+    const colour  = USER_LAYER_COLOURS[state.userLayers.length % USER_LAYER_COLOURS.length];
+    const id      = Date.now() + Math.random();
+    const fc      = geojson.type === 'FeatureCollection' ? geojson
+                  : geojson.type === 'Feature'           ? { type:'FeatureCollection', features:[geojson] }
+                  : { type:'FeatureCollection', features:[{ type:'Feature', geometry:geojson, properties:{} }] };
+
+    const leafletLayer = L.geoJSON(fc, {
+      style:       () => ({ color: colour, weight: 2, fillColor: colour, fillOpacity: 0.15, opacity: 0.9 }),
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius: 5, fillColor: colour, color: colour, weight: 1, fillOpacity: 0.8 }),
+      onEachFeature: (f, layer) => {
+        const props = f.properties || {};
+        const rows  = Object.entries(props).slice(0,8)
+          .map(([k,v]) => `<tr><td style="color:var(--muted);padding-right:8px;white-space:nowrap;font-size:10px">${k}</td><td style="font-size:10px">${v ?? '—'}</td></tr>`).join('');
+        if (rows) layer.bindPopup(`<table style="font-family:Arial,sans-serif">${rows}</table>`);
+      }
+    }).addTo(state.map);
+
+    // Zoom to layer
+    try { state.map.fitBounds(leafletLayer.getBounds(), { padding: [30,30], maxZoom: 14 }); } catch {}
+
+    state.userLayers.push({ id, name, colour, visible: true, leafletLayer, featureCount: fc.features.length });
+    renderUserLayerList();
+    log(`${name}: ${fc.features.length.toLocaleString()} features added`, 'ok');
+  } catch(e) {
+    log(`Data load error: ${e.message}`, 'error');
+  }
+}
+
+function renderUserLayerList() {
+  const list = document.getElementById('userLayerList');
+  if (!state.userLayers.length) { list.innerHTML = ''; return; }
+  list.innerHTML = state.userLayers.map((l, i) => `
+    <div class="user-layer-item">
+      <div class="user-layer-swatch" style="background:${l.colour}" title="Change colour">
+        <input type="color" value="${l.colour}" oninput="recolourUserLayer(${i}, this.value)">
+      </div>
+      <span class="user-layer-name" title="${l.name}">${l.name}</span>
+      <span class="user-layer-count">${l.featureCount.toLocaleString()}</span>
+      <div class="user-layer-actions">
+        <button class="user-layer-btn" onclick="toggleUserLayer(${i})"
+                title="${l.visible ? 'Hide' : 'Show'}">${l.visible ? '👁' : '👁‍🗨'}</button>
+        <button class="user-layer-btn remove" onclick="removeUserLayer(${i})" title="Remove">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function toggleUserLayer(idx) {
+  const l = state.userLayers[idx];
+  if (!l) return;
+  l.visible = !l.visible;
+  if (l.visible) l.leafletLayer.addTo(state.map);
+  else           state.map.removeLayer(l.leafletLayer);
+  renderUserLayerList();
+}
+
+function recolourUserLayer(idx, colour) {
+  const l = state.userLayers[idx];
+  if (!l) return;
+  l.colour = colour;
+  l.leafletLayer.setStyle({ color: colour, fillColor: colour });
+  l.leafletLayer.eachLayer(sub => {
+    if (sub.setStyle) sub.setStyle({ color: colour, fillColor: colour });
+  });
+  renderUserLayerList();
+}
+
+function removeUserLayer(idx) {
+  const l = state.userLayers[idx];
+  if (!l) return;
+  state.map.removeLayer(l.leafletLayer);
+  state.userLayers.splice(idx, 1);
+  renderUserLayerList();
+  log('Data layer removed', 'info');
+}
+// ═══════════════════════════════════════════════════════════
+// MAP LEGEND TOGGLE
+// ═══════════════════════════════════════════════════════════
+function toggleLegend() {
+  const body    = document.getElementById('legendBody');
+  const chevron = document.getElementById('legendChevron');
+  const open    = body.style.display !== 'none';
+  body.style.display      = open ? 'none' : 'block';
+  chevron.style.transform = open ? 'rotate(180deg)' : 'rotate(0deg)';
+}
+
+function toggleAddData() {
+  const body    = document.getElementById('addDataBody');
+  const chevron = document.getElementById('addDataChevron');
+  const open    = body.style.display !== 'none';
+  body.style.display      = open ? 'none' : 'block';
+  chevron.style.transform = open ? 'rotate(180deg)' : 'rotate(0deg)';
+}
+
+const BASEMAPS = [
+  { id: 'ocean',       label: 'Ocean',          icon: '🌊',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 13, attr: 'Tiles © Esri' },
+  { id: 'topo',        label: 'Topographic',    icon: '⛰',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 19, attr: 'Tiles © Esri' },
+  { id: 'street',      label: 'Streets',        icon: '🛣',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 19, attr: 'Tiles © Esri' },
+  { id: 'imagery',     label: 'Imagery',        icon: '🛰',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 19, attr: 'Tiles © Esri' },
+  { id: 'darkgrey',    label: 'Dark Grey',      icon: '◼',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 16, attr: 'Tiles © Esri' },
+  { id: 'lightgrey',   label: 'Light Grey',     icon: '◻',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 16, attr: 'Tiles © Esri' },
+  { id: 'natgeo',      label: 'Nat. Geographic', icon: '🗺',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}',
+    maxZoom: 16, attr: 'Tiles © Esri, National Geographic' },
+  { id: 'cartolight',  label: 'Carto Light',    icon: '☀',
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    maxZoom: 19, attr: '© OpenStreetMap · © CARTO', subdomains: 'abcd' },
+  { id: 'cartodark',   label: 'Carto Dark',     icon: '🌙',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    maxZoom: 19, attr: '© OpenStreetMap · © CARTO', subdomains: 'abcd' },
+];
+
+let _activeBasemapId  = 'ocean';
+let _activeBasemapLayer = null;
+
+function initBasemapPicker() {
+  // Build grid items
+  const grid = document.getElementById('basemapGrid');
+  grid.innerHTML = BASEMAPS.map(b => `
+    <div class="basemap-item ${b.id === _activeBasemapId ? 'active' : ''}"
+         id="bm-${b.id}" onclick="switchBasemap('${b.id}')">
+      <div class="basemap-thumb">${b.icon}</div>
+      <div class="basemap-label">${b.label}</div>
+    </div>`).join('');
+
+  // Load default basemap
+  switchBasemap(_activeBasemapId);
+
+  // Close picker when clicking outside
+  document.addEventListener('click', e => {
+    if (!document.getElementById('basemapPicker')?.contains(e.target) &&
+        !document.getElementById('basemapToggle')?.contains(e.target)) {
+      document.getElementById('basemapPicker')?.classList.remove('open');
+    }
+  });
+}
+
+function toggleBasemapPicker() {
+  document.getElementById('basemapPicker').classList.toggle('open');
+}
+
+function switchBasemap(id) {
+  const bm = BASEMAPS.find(b => b.id === id);
+  if (!bm) return;
+
+  // Remove current basemap tile layer
+  if (_activeBasemapLayer) state.map.removeLayer(_activeBasemapLayer);
+
+  // Add new basemap below all other layers using the overlay pane trick
+  _activeBasemapLayer = L.tileLayer(bm.url, {
+    attribution: bm.attr,
+    maxZoom:     bm.maxZoom,
+    subdomains:  bm.subdomains || 'abc'
+  });
+  // Insert at bottom of map layer stack
+  _activeBasemapLayer.addTo(state.map);
+  _activeBasemapLayer.bringToBack();
+
+  // Update active styling
+  document.querySelectorAll('.basemap-item').forEach(el => el.classList.remove('active'));
+  document.getElementById(`bm-${id}`)?.classList.add('active');
+  _activeBasemapId = id;
+
+  // Close picker
+  document.getElementById('basemapPicker').classList.remove('open');
+  log(`Basemap: ${bm.label}`, 'ok');
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOAD LAYERS
+// ═══════════════════════════════════════════════════════════
+async function loadAllLayers() {
+  setStatus('loading');
+  log('Fetching layers…', 'info');
+
+  // Load LGA and STE first (needed for analysis / base layers), then point layers in parallel
+  try {
+    log('Loading LGA Boundaries (ABS)…', 'info');
+    const lgaData = await fetchGeoJSON('LGA');
+    state.geoData.LGA = lgaData;
+
+    // Detect the LGA name field from the first feature — skip any code fields
+    if (lgaData.features.length > 0) {
+      const props = lgaData.features[0].properties;
+      // Try known name field candidates first
+      state.lgaNameField = CONFIG.layers.LGA.nameField.find(f => props[f] !== undefined);
+      // Fallback: find any field with NAME in it that isn't CODE
+      if (!state.lgaNameField) {
+        state.lgaNameField = Object.keys(props).find(k =>
+          k.toUpperCase().includes('NAME') && !k.toUpperCase().includes('CODE')
+        );
+      }
+      // Last resort: first non-code field
+      if (!state.lgaNameField) {
+        state.lgaNameField = Object.keys(props).find(k => !k.toUpperCase().includes('CODE'));
+      }
+      log(`LGA name field resolved to: "${state.lgaNameField}"`, 'ok');
+    }
+
+    renderLayer('LGA', lgaData);
+    document.getElementById('countLGA').textContent = lgaData.features.length.toLocaleString();
+    log(`LGA Boundaries: ${lgaData.features.length.toLocaleString()} features`, 'ok');
+    buildLGAIndex(lgaData);  // build spatial index for fast point-in-polygon
+  } catch(e) {
+    log(`Error loading LGA: ${e.message}`, 'error');
+  }
+
+  try {
+    log('Loading State / Territory (ABS)…', 'info');
+    const steData = await fetchGeoJSON('STE');
+    state.geoData.STE = steData;
+    renderLayer('STE', steData);
+    document.getElementById('countSTE').textContent = steData.features.length.toLocaleString();
+    log(`State / Territory: ${steData.features.length.toLocaleString()} features`, 'ok');
+  } catch(e) {
+    log(`Error loading STE: ${e.message}`, 'error');
+  }
+
+  // Point layers A, B, E, F — deferred until user zooms to regional scale
+  // This avoids loading large national datasets on startup
+  state.pointLayersLoaded = false;
+  state.pointLayersReady  = false;
+
+  state.layersReady = true;
+  if (state.aoi) document.getElementById('runBtn').disabled = false;
+  if (state.updateZoomVisibility) state.updateZoomVisibility();
+  setStatus('ready');
+  log('Point layers will load on zoom in', 'info');
+}
+
+// ═══════════════════════════════════════════════════════════
+// STE LABELS — built from hardcoded positions, independent of line geometry
+// ═══════════════════════════════════════════════════════════
+function buildSTELabels(minZoom, maxZoom, actLabelPos, actAnchorPos) {
+  const CENTROIDS = {
+    'New South Wales':              [-31.8, 146.9],
+    'Victoria':                     [-36.9, 144.5],
+    'Queensland':                   [-22.5, 144.4],
+    'South Australia':              [-29.5, 135.5],
+    'Western Australia':            [-25.5, 121.6],
+    'Tasmania':                     [-42.0, 146.5],
+    'Northern Territory':           [-19.5, 133.4],
+    'Australian Capital Territory': null  // uses leader line
+  };
+
+  // Store all label elements so we can show/hide them together
+  state.steLabels = [];
+
+  const updateAll = () => {
+    const z       = state.map.getZoom();
+    const visible = state.leafletLayers.STE &&
+                    state.map.hasLayer(state.leafletLayers.STE) &&
+                    z >= minZoom && z <= maxZoom;
+    state.steLabels.forEach(({ elements }) => {
+      elements.forEach(el => {
+        if (visible) { if (!state.map.hasLayer(el)) el.addTo(state.map); }
+        else         { if ( state.map.hasLayer(el)) state.map.removeLayer(el); }
+      });
+    });
+  };
+
+  state._updateSTELabels = updateAll;
+  state.map.on('zoomend', updateAll);
+
+  // Standard centroid labels
+  Object.entries(CENTROIDS).forEach(([name, pos]) => {
+    if (!pos) return;
+    const [lat, lng] = pos;
+    const label = L.tooltip({
+      permanent: true, direction: 'center',
+      className: 'ste-label', interactive: false, opacity: 1
+    }).setContent(name).setLatLng([lat, lng]);
+    state.steLabels.push({ elements: [label] });
+  });
+
+  // ACT — leader line label
+  const actMarker = L.marker(actLabelPos, { opacity: 0, interactive: false, keyboard: false })
+    .bindTooltip('Australian Capital Territory', {
+      permanent: true, direction: 'right',
+      className: 'ste-label ste-label-act',
+      interactive: false, opacity: 1, offset: [2, 0]
+    });
+  const leaderLine = L.polyline([actLabelPos, actAnchorPos],
+    { color: '#00797A', weight: 1.5, opacity: 0.8, dashArray: '4 3', interactive: false });
+  const anchorDot  = L.circleMarker(actAnchorPos,
+    { radius: 2.5, color: '#00797A', fillColor: '#00797A', fillOpacity: 1, weight: 0, interactive: false });
+  state.steLabels.push({ elements: [actMarker, leaderLine, anchorDot] });
+}
+
+async function loadPointLayers() {
+  log('Zoomed in — loading point layers…', 'info');
+  setStatus('loading');
+  await Promise.all(['A','B','E','F'].map(async key => {
+    try {
+      log(`Loading ${CONFIG.layers[key].name}…`, 'info');
+      const data = await fetchGeoJSON(key);
+      state.geoData[key] = data;
+      renderLayer(key, data);
+      log(`${CONFIG.layers[key].name}: ${data.features.length.toLocaleString()} features`, 'ok');
+    } catch(e) {
+      log(`Error loading ${CONFIG.layers[key].name}: ${e.message}`, 'error');
+    }
+  }));
+
+  // Tag each point with its LGA/state for fast pre-filtering at analysis time
+  // This is a one-time cost — done here so analysis runs are faster
+  if (_lgaIndex) {
+    log('Tagging point features with LGA/state attributes…', 'info');
+    const tick = () => new Promise(r => setTimeout(r, 0));
+    for (const key of ['A','B','E','F']) {
+      const src = state.geoData[key];
+      if (!src) continue;
+      for (let i = 0; i < src.features.length; i++) {
+        const f = src.features[i];
+        if (!f.geometry) continue;
+        try {
+          let pt = f;
+          if (f.geometry.type !== 'Point') {
+            const cen = turf.centroid(f);
+            pt = cen;
+          }
+          const { lga, stateCode } = findLGA(pt);
+          f._stateCode = stateCode;  // used for state-level pre-filter at analysis time
+          f._lgaName   = lga;
+        } catch {}
+        if (i % 500 === 0) await tick();
+      }
+      log(`${CONFIG.layers[key].name}: LGA tags applied`, 'ok');
+    }
+  }
+
+  setStatus('ready');
+}
+
+async function fetchGeoJSON(key) {
+  const cfg      = CONFIG.layers[key];
+  const pageSize = 2000;
+  let offset = 0, allFeatures = [], exceeded = true;
+
+  while (exceeded) {
+    const sep  = cfg.url.includes('?') ? '&' : '?';
+    const url  = `${cfg.url}${sep}resultOffset=${offset}&resultRecordCount=${pageSize}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${cfg.name}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message || 'ArcGIS error');
+
+    const page = data.features || [];
+    allFeatures = allFeatures.concat(page);
+    // ArcGIS REST GeoJSON puts flag at root or under properties depending on service version
+    exceeded = data.exceededTransferLimit === true || data.properties?.exceededTransferLimit === true;
+    offset  += page.length;
+
+    if (page.length > 0 && exceeded) {
+      log(`${cfg.name}: ${allFeatures.length.toLocaleString()} features loaded, fetching more…`, 'info');
+    }
+    if (page.length === 0) break; // safety
+  }
+
+  return { type: 'FeatureCollection', features: allFeatures };
+}
+
+// Fetch an on-demand layer filtered to the AOI bounding box
+async function fetchGeoJSONWithBbox(key, aoiFeature) {
+  const cfg  = CONFIG.layers[key];
+  const bbox = turf.bbox(aoiFeature); // [minX, minY, maxX, maxY]
+  const params = new URLSearchParams({
+    geometry:     `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`,
+    geometryType: 'esriGeometryEnvelope',
+    inSR:         '4326',
+    spatialRel:   'esriSpatialRelIntersects',
+    outFields:    '*',
+    where:        '1=1',
+    f:            'geojson'
+  });
+  const resp = await fetch(`${cfg.urlBase}?${params}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${cfg.name}`);
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message || 'ArcGIS error');
+  if (data.exceededTransferLimit) log(`${cfg.name}: transfer limit reached — results may be incomplete`, 'warn');
+  return data;
+}
+
+function renderLayer(key, geojson) {
+  if (state.leafletLayers[key]) state.map.removeLayer(state.leafletLayers[key]);
+
+  if (key === 'STE') {
+    const STE_LABEL_MIN_ZOOM = 3;
+    const STE_MAX_ZOOM       = 6;
+
+    // Hardcoded visual centroids for each state/territory (largest polygon centre)
+    const STE_CENTROIDS = {
+      'New South Wales':              [-31.8, 146.9],
+      'Victoria':                     [-36.9, 144.5],
+      'Queensland':                   [-22.5, 144.4],
+      'South Australia':              [-29.5, 135.5],
+      'Western Australia':            [-25.5, 121.6],
+      'Tasmania':                     [-42.0, 146.5],
+      'Northern Territory':           [-19.5, 133.4],
+      'Australian Capital Territory': null   // uses leader line instead
+    };
+
+    // ACT leader line config — label offshore, line points to ACT
+    const ACT_LABEL_POS  = [-35.5, 150.8];  // directly east of ACT polygon
+    const ACT_ANCHOR_POS = [-35.5, 149.1];  // line anchor on ACT
+
+    state.leafletLayers.STE = L.geoJSON(geojson, {
+      style: { color: '#00797A', weight: 1.5, opacity: 0.8, pane: 'stePane' },
+      pane: 'stePane'
+    }); // not added to map here — updateZoomVisibility controls it
+
+    // Build labels independently from hardcoded positions
+    // They are added/removed by updateZoomVisibility, not tied to individual line features
+    buildSTELabels(STE_LABEL_MIN_ZOOM, STE_MAX_ZOOM, ACT_LABEL_POS, ACT_ANCHOR_POS);
+    return;
+  }
+
+  if (key === 'LGA') {
+    const LABEL_MIN_ZOOM = 9;
+
+    state.leafletLayers.LGA = L.geoJSON(geojson, {
+      style: { color: '#003E5A', weight: 1, fillColor: '#003E5A', fillOpacity: 0.04, opacity: 0.7, dashArray: '4 4', pane: 'lgaPane' },
+      pane: 'lgaPane',
+      onEachFeature: (f, layer) => {
+        const name = getLGAName(f);
+
+        // Hover tooltip
+        layer.bindTooltip(name, { sticky: true, className: 'lga-tip' });
+
+        // Click — highlight + popup with profile download
+        layer.on('click', () => {
+          // Reset any previously highlighted LGA
+          if (state._highlightedLGA && state._highlightedLGA !== layer) {
+            state._highlightedLGA.setStyle({
+              color: '#003E5A', weight: 1, fillColor: '#003E5A',
+              fillOpacity: 0.04, opacity: 0.7, dashArray: '4 4'
+            });
+          }
+
+          // Highlight and zoom to this LGA
+          layer.setStyle({ color: '#f2af00', weight: 2.5, fillColor: '#f2af00', fillOpacity: 0.18, dashArray: null });
+          layer.bringToFront();
+          state._highlightedLGA = layer;
+          // Zoom, pan and centre on this LGA
+          try {
+            const bbox = turf.bbox(f);
+            // turf bbox: [minLng, minLat, maxLng, maxLat]
+            // Leaflet bounds: [[minLat, minLng], [maxLat, maxLng]]
+            const leafletBounds = L.latLngBounds(
+              L.latLng(bbox[1], bbox[0]),
+              L.latLng(bbox[3], bbox[2])
+            );
+            state.map.flyToBounds(leafletBounds, { padding: [60, 60], maxZoom: 12, duration: 0.8 });
+          } catch {}
+
+          // LGA name from ABS already includes state abbrev e.g. "Bayside (NSW)"
+          // so the NEMA profile URL is built directly from it
+          const profileUrl = `https://www.nema.gov.au/sites/default/files/LGAProfiles/${encodeURIComponent(name)}%20-%20LGA%20profile.docx`;
+
+          layer.bindPopup(`
+            <div style="font-family:Arial,sans-serif;min-width:180px">
+              <div style="font-weight:700;font-size:13px;margin-bottom:8px;color:#003E5A">${name}</div>
+              <a href="${profileUrl}"
+                 target="_blank"
+                 rel="noopener noreferrer"
+                 style="display:inline-flex;align-items:center;gap:5px;
+                        background:#003E5A;color:#fff;font-size:11px;font-weight:600;
+                        padding:5px 10px;border-radius:4px;text-decoration:none"
+                 title="Download LGA Profile from NEMA (opens in new tab)">
+                ↓ LGA Profile
+              </a>
+              <div style="font-size:9px;color:#999;margin-top:6px;line-height:1.4">
+                Source: NEMA. Opens in a new tab.<br>
+                Not all LGAs have a profile available.
+              </div>
+            </div>`, { maxWidth: 240 }
+          ).openPopup();
+        });
+
+        layer.on('add', () => {
+          try {
+            // Primary: bounding box centre (fast, works well for regular shapes)
+            // Fallback: polylabel if bbox centre falls outside the polygon
+            let lng, lat;
+            try {
+              const bbox = turf.bbox(f);
+              const bboxCentre = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
+              const bboxPoint  = turf.point(bboxCentre);
+
+              if (turf.booleanPointInPolygon(bboxPoint, f)) {
+                [lng, lat] = bboxCentre;
+              } else {
+                // bbox centre outside polygon — use polylabel
+                const _polylabel = window.polylabel?.default || window.polylabel;
+                let rings;
+                if (f.geometry.type === 'MultiPolygon') {
+                  rings = f.geometry.coordinates.reduce((best, poly) =>
+                    turf.area({ type: 'Feature', geometry: { type: 'Polygon', coordinates: poly } }) >
+                    turf.area({ type: 'Feature', geometry: { type: 'Polygon', coordinates: best } })
+                    ? poly : best
+                  );
+                } else {
+                  rings = f.geometry.coordinates;
+                }
+                const point = _polylabel(rings, 0.0001);
+                [lng, lat] = point;
+              }
+            } catch {
+              const centre = turf.centroid(f);
+              [lng, lat] = centre.geometry.coordinates;
+            }
+            const label = L.tooltip({
+              permanent:   true,
+              direction:   'center',
+              className:   'lga-label',
+              interactive: false,
+              opacity:     1
+            })
+            .setContent(name)
+            .setLatLng([lat, lng]);
+
+            layer._lgaLabel = label;
+
+            const updateVisibility = () => {
+              const zoom = state.map.getZoom();
+              if (zoom >= LABEL_MIN_ZOOM) {
+                if (!state.map.hasLayer(label)) label.addTo(state.map);
+              } else {
+                if (state.map.hasLayer(label)) state.map.removeLayer(label);
+              }
+            };
+
+            state.map.on('zoomend', updateVisibility);
+            layer.on('remove', () => {
+              state.map.removeLayer(label);
+              state.map.off('zoomend', updateVisibility);
+            });
+
+            updateVisibility();
+          } catch {}
+        });
+      }
+    }); // not added to map here — updateZoomVisibility controls it
+    return;
+  }
+
+  const cfg = CONFIG.layers[key];
+  state.leafletLayers[key] = L.geoJSON(geojson, {
+    pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+      radius: 5, fillColor: cfg.color, color: '#003E5A', weight: 0.5, fillOpacity: 0.8
+    }),
+    onEachFeature: (f, layer) => {
+      const props = f.properties || {};
+      let title = '';
+      if (cfg.labelField) {
+        title = cfg.labelField.map(fn => props[fn]).find(v => v) || '';
+      } else if (cfg.popField) {
+        const v = props[cfg.popField];
+        title = v != null ? `Population: ${Math.ceil(parseFloat(v) || 0).toLocaleString()}` : '';
+      }
+      const rows = Object.entries(props).slice(0, 6)
+        .map(([k,v]) => `<tr><td style="color:var(--muted);padding-right:8px;white-space:nowrap">${k}</td><td>${v ?? '—'}</td></tr>`)
+        .join('');
+      layer.bindPopup(`
+        <div style="font-size:12px;min-width:160px;max-width:260px">
+          ${title ? `<div style="font-weight:600;margin-bottom:6px;color:${cfg.color}">${title}</div>` : ''}
+          <table style="font-size:11px;width:100%">${rows}</table>
+        </div>`);
+    }
+  }); // not added to map here — updateZoomVisibility controls it
+}
+
+function getLGAName(feature) {
+  if (state.lgaNameField && feature.properties?.[state.lgaNameField]) {
+    return feature.properties[state.lgaNameField];
+  }
+  // Fallback: try all candidate fields
+  for (const f of CONFIG.layers.LGA.nameField) {
+    if (feature.properties?.[f]) return feature.properties[f];
+  }
+  return 'Unknown LGA';
+}
+
+function toggleLayer(key, visible) {
+  const layer = state.leafletLayers[key];
+  if (!layer) return;
+  if (!visible) {
+    state.map.removeLayer(layer);
+  } else {
+    const z = state.map.getZoom();
+    if (key === 'LGA' && z < 7) return; // don't show LGA at national zoom
+    state.map.addLayer(layer);
+  }
+}
+async function reloadLayers() {
+  log('Reloading all layers…', 'info');
+  _lgaSearchIndex         = null;
+  state.pointLayersLoaded = false;
+  state.pointLayersReady  = false;
+  ['A','B','E','F'].forEach(k => {
+    if (state.leafletLayers[k]) { state.map.removeLayer(state.leafletLayers[k]); state.leafletLayers[k] = null; }
+    state.geoData[k] = null;
+  });
+  await loadAllLayers();
+}
+
+// ═══════════════════════════════════════════════════════════
+// AOI TABS
+// ═══════════════════════════════════════════════════════════
+function switchAOITab(tab) {
+  document.getElementById('tabDraw').classList.toggle('active',   tab === 'draw');
+  document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
+  document.getElementById('paneDrawContent').classList.toggle('active',   tab === 'draw');
+  document.getElementById('paneUploadContent').classList.toggle('active', tab === 'upload');
+  if (tab !== 'draw' && state.isDrawing) state.drawHandler.disable();
+}
+
+// ═══════════════════════════════════════════════════════════
+// DRAW AOI
+// ═══════════════════════════════════════════════════════════
+function startDrawing() {
+  document.getElementById('drawHint').classList.add('visible');
+  document.getElementById('btnStartDraw').style.display  = 'none';
+  document.getElementById('btnCancelDraw').style.display = '';
+  state.drawHandler.enable();
+}
+
+function cancelDrawing() {
+  state.drawHandler.disable(); // discards in-progress polygon
+  document.getElementById('drawHint').classList.remove('visible');
+  document.getElementById('btnCancelDraw').style.display = 'none';
+  document.getElementById('btnStartDraw').style.display  = '';
+  const count = state.drawnItems.getLayers().length;
+  document.getElementById('btnStartDraw').textContent =
+    count > 0 ? '+ Add polygon' : '✏ Draw polygon on map';
+  log('Drawing cancelled', 'info');
+}
+
+function renderPolyList() {
+  const layers  = state.drawnItems.getLayers();
+  const wrap    = document.getElementById('drawnPolyList');
+  const section = document.getElementById('aoiManageSection');
+  if (!layers.length) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+
+  const items = layers.map((l, i) => {
+    const area   = areaKm2(l.toGeoJSON());
+    const label  = l._polyLabel  || `Polygon ${i+1}`;
+    const source = l._polySource === 'upload' ? '⬆' : '✏';
+    return `<div class="poly-list-item"
+         onmouseenter="highlightPoly(${i}, true)"
+         onmouseleave="highlightPoly(${i}, false)">
+      <span class="poly-source" title="${l._polySource === 'upload' ? 'Uploaded' : 'Drawn'}">${source}</span>
+      <div class="poly-info">
+        <span class="poly-num">${label}</span>
+        <span class="poly-area">${area.toLocaleString()} sq km</span>
+      </div>
+      <div class="poly-actions">
+        <button class="poly-edit-btn" onclick="startEditingPoly(${i})" title="Edit">✎</button>
+        <button class="poly-del"      onclick="removePolygon(${i})"    title="Remove">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="poly-list-header">
+      <span>${layers.length} polygon${layers.length !== 1 ? 's' : ''}</span>
+      <button class="poly-remove-all" onclick="removeAllPolygons()">Remove all</button>
+    </div>
+    ${items}
+    <div id="editModeRow" style="display:none;margin-top:6px">
+      <div class="draw-mode-indicator visible" style="margin:0">
+        <div class="draw-pulse"></div>
+        <span id="drawModeLabel">Editing…</span>
+      </div>
+      <button class="btn btn-ghost" onclick="cancelEditing()"
+              style="margin-top:6px;font-size:11px;padding:5px 8px;border-color:var(--danger);color:var(--danger)">
+        ✕ Cancel edit
+      </button>
+    </div>`;
+}
+
+function highlightPoly(idx, on) {
+  const layers = state.drawnItems.getLayers();
+  if (!layers[idx]) return;
+  const l = layers[idx];
+  if (on) {
+    l.setStyle({ color: '#fff', weight: 3, fillOpacity: 0.35 });
+    l.bringToFront();
+  } else {
+    l.setStyle({ color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' });
+  }
+}
+
+function addPolyLabel(layer) {
+  const label = layer._polyLabel;
+  if (!label) return;
+  // Attach permanent tooltip at polygon centroid
+  try {
+    const centre = turf.centroid(layer.toGeoJSON());
+    const [lng, lat] = centre.geometry.coordinates;
+    layer.bindTooltip(label, {
+      permanent:   true,
+      direction:   'center',
+      className:   'poly-map-label',
+      interactive: false,
+      opacity:     1
+    });
+    // Position tooltip at centroid rather than default layer anchor
+    layer._tooltip?.setLatLng([lat, lng]);
+  } catch {}
+}
+
+async function removePolygon(idx) {
+  const layers = state.drawnItems.getLayers();
+  if (!layers[idx]) return;
+  const label = layers[idx]._polyLabel || `Polygon ${idx+1}`;
+  state.drawnItems.removeLayer(layers[idx]);
+  const remaining = state.drawnItems.getLayers().length;
+  if (remaining === 0) {
+    clearAOI();
+    return;
+  }
+  const unioned = await unionDrawnLayers();
+  if (unioned) setAOI(unioned, 'draw');
+  renderPolyList();
+  document.getElementById('btnStartDraw').textContent = '+ Add polygon';
+  log(`${label} removed — ${remaining} polygon${remaining !== 1 ? 's' : ''} remaining`, 'ok');
+}
+
+function removeAllPolygons() {
+  clearAOI();
+}
+
+async function unionDrawnLayers() {
+  const layers = state.drawnItems.getLayers();
+  if (!layers.length) return null;
+  if (layers.length === 1) return layers[0].toGeoJSON();
+  try {
+    const tick = () => new Promise(r => setTimeout(r, 0));
+    const features = layers.map(l => l.toGeoJSON());
+
+    // For the union dissolve step only, pre-simplify each input if very complex
+    // This avoids the union itself hanging — the individual polygons on the map stay at full resolution
+    const forUnion = features.map(f => {
+      const v = countVertices(f);
+      if (v > 2000) {
+        try { return simplifyToTarget(f, 1500); } catch {}
+      }
+      return f;
+    });
+
+    let dissolved = forUnion[0];
+    for (let i = 1; i < forUnion.length; i++) {
+      await tick();
+      dissolved = turf.union(dissolved, forUnion[i]);
+      log(`Dissolving polygon ${i+1} of ${forUnion.length}…`, 'info');
+    }
+
+    // Re-dissolve using the full-resolution geometries for the final stored AOI
+    // Only do this if the union succeeded and there aren't too many total vertices
+    const totalVerts = features.reduce((s, f) => s + countVertices(f), 0);
+    if (totalVerts <= 10000) {
+      let fullDissolved = features[0];
+      for (let i = 1; i < features.length; i++) {
+        await tick();
+        fullDissolved = turf.union(fullDissolved, features[i]);
+      }
+      return fullDissolved;
+    }
+
+    // Too many vertices for a full-resolution union — use the pre-simplified result
+    log(`⚠ AOI has ${totalVerts.toLocaleString()} total vertices — using pre-simplified union to prevent browser freeze`, 'warn');
+    return dissolved;
+
+  } catch(e) {
+    log(`Union of drawn polygons failed: ${e.message}`, 'error');
+    return layers[0].toGeoJSON();
+  }
+}
+
+async function onDrawCreated(e) {
+  document.getElementById('drawHint').classList.remove('visible');
+  document.getElementById('btnCancelDraw').style.display = 'none';
+  document.getElementById('btnStartDraw').style.display  = '';
+  state.polyCounter++;
+  e.layer._polyLabel  = `Polygon ${state.polyCounter}`;
+  e.layer._polySource = 'draw';
+  state.drawnItems.addLayer(e.layer);
+  addPolyLabel(e.layer);
+  const unioned = await unionDrawnLayers();
+  if (unioned) setAOI(unioned, 'draw');
+  const count = state.drawnItems.getLayers().length;
+  renderPolyList();
+  if (count > 1) log(`${count} polygons — dissolved into single AOI`, 'ok');
+}
+
+function startEditingPoly(idx) {
+  const layers = state.drawnItems.getLayers();
+  if (!layers[idx]) return;
+  state._editingIdx = idx;
+  const tempGroup = new L.FeatureGroup([layers[idx]]).addTo(state.map);
+  state._editTempGroup = tempGroup;
+  state.editHandler = new L.EditToolbar.Edit(state.map, {
+    featureGroup: tempGroup,
+    selectedPathOptions: { color: '#2d7592', dashArray: '4 4', fillOpacity: 0.2 }
+  });
+  state.editHandler.enable();
+  state.isEditing = true;
+  showDrawMode(`Editing ${layers[idx]._polyLabel || 'polygon'}…`);
+  // Show cancel edit in the manage section
+  const row = document.getElementById('editModeRow');
+  if (row) row.style.display = 'block';
+}
+
+function cancelEditing() {
+  if (state.editHandler) {
+    state.editHandler.revertLayers();
+    state.editHandler.disable();
+    state.editHandler = null;
+  }
+  if (state._editTempGroup) {
+    state.map.removeLayer(state._editTempGroup);
+    state._editTempGroup = null;
+  }
+  state.isEditing    = false;
+  state._editingIdx  = null;
+  hideDrawMode();
+  const row = document.getElementById('editModeRow');
+  if (row) row.style.display = 'none';
+  log('Edit cancelled — polygon reverted', 'info');
+}
+
+function onEditStop() {
+  state.isEditing = false;
+  hideDrawMode();
+  if (state._editTempGroup) { state.map.removeLayer(state._editTempGroup); state._editTempGroup = null; }
+  state.editHandler = null;
+  state._editingIdx = null;
+  const row = document.getElementById('editModeRow');
+  if (row) row.style.display = 'none';
+}
+async function onEdited(e) {
+  const unioned = await unionDrawnLayers();
+  if (unioned) setAOI(unioned, 'draw');
+  renderPolyList();
+  log('AOI polygon updated', 'ok');
+}
+
+// ═══════════════════════════════════════════════════════════
+// UPLOAD AOI
+// ═══════════════════════════════════════════════════════════
+function onDragOver(e, zoneId)  { e.preventDefault(); document.getElementById(zoneId||'uploadZone').classList.add('drag-over'); }
+function onDragLeave(zoneId)  { document.getElementById(zoneId||'uploadZone').classList.remove('drag-over'); }
+function onDrop(e)      { e.preventDefault(); onDragLeave('uploadZone'); if (e.dataTransfer.files[0]) processAOIFile(e.dataTransfer.files[0]); }
+function onDropPop(e)   { e.preventDefault(); onDragLeave('popUploadZone'); if (e.dataTransfer.files[0]) loadPopulationRaster(e.dataTransfer.files[0]); }
+function handleFileSelect(e) { if (e.target.files[0]) processAOIFile(e.target.files[0]); }
+function handlePopFileSelect(e) { if (e.target.files[0]) loadPopulationRaster(e.target.files[0]); }
+
+async function processAOIFile(file) {
+  log(`Loading: ${file.name}`, 'info');
+  setStatus('loading');
+  try {
+    const ext = file.name.split('.').pop().toLowerCase();
+    let geojson;
+    if      (ext === 'zip')                    { geojson = await shp(await file.arrayBuffer()); log('Parsed Shapefile (.zip)', 'ok'); }
+    else if (ext === 'kml' || ext === 'kmz')   { geojson = toGeoJSON.kml(new DOMParser().parseFromString(await file.text(), 'text/xml')); log('Parsed KML', 'ok'); }
+    else if (ext === 'geojson' || ext === 'json') { geojson = JSON.parse(await file.text()); log('Parsed GeoJSON', 'ok'); }
+    else throw new Error(`Unsupported format: .${ext}`);
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+    addPolygonsToRegistry(geojson, baseName);
+    document.getElementById('fileInput').value = '';
+    setStatus('ready');
+  } catch(e) {
+    log(`Upload error: ${e.message}`, 'error');
+    setStatus('error');
+  }
+}
+
+async function addPolygonsToRegistry(geojson, sourceLabel) {
+  let features = [];
+  if (geojson.type === 'FeatureCollection') features = geojson.features;
+  else if (geojson.type === 'Feature')       features = [geojson];
+  else                                       features = [{ type:'Feature', geometry:geojson, properties:{} }];
+
+  features = features.filter(f =>
+    f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon'
+  );
+  if (!features.length) throw new Error('No polygon features found');
+
+  features.forEach((f) => {
+    state.polyCounter++;
+    const label = features.length === 1
+      ? (sourceLabel || `Polygon ${state.polyCounter}`)
+      : `${sourceLabel || 'Polygon'} ${state.polyCounter}`;
+
+    // Create a Leaflet layer from the single feature
+    const gj = L.geoJSON(f, {
+      style: { color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.15, dashArray: '6 4' }
+    });
+    let innerLayer = null;
+    gj.eachLayer(l => { innerLayer = l; });
+    if (!innerLayer) return;
+
+    innerLayer._polyLabel  = label;
+    innerLayer._polySource = 'upload';
+    state.drawnItems.addLayer(innerLayer);
+    addPolyLabel(innerLayer);
+    log(`Added: ${label}`, 'ok');
+  });
+
+  const unioned = await unionDrawnLayers();
+  if (unioned) setAOI(unioned, 'draw');
+  renderPolyList();
+  try { state.map.fitBounds(state.drawnItems.getBounds(), { padding: [40, 40] }); } catch {}
+}
+
+// ═══════════════════════════════════════════════════════════
+// SET AOI
+// ═══════════════════════════════════════════════════════════
+const AOI_VERTEX_WARN     = 1000;
+const AOI_VERTEX_CONFIRM  = 10000;
+// Complexity tiers for user notifications
+const AOI_TIERS = [
+  { max: 5000,    label: 'Simple',       colour: '#3fb950' },
+  { max: 50000,   label: 'Moderate',     colour: '#f2af00' },
+  { max: 500000,  label: 'Complex',      colour: '#e07b39' },
+  { max: Infinity,label: 'Very Complex', colour: '#e05c5c' }
+];
+function aoiComplexityTier(verts) {
+  return AOI_TIERS.find(t => verts <= t.max);
+}
+
+// ── Ring index — decompose AOI into individual rings for tiled PIP ──
+// Each entry in the rbush index is one ring (exterior or hole) with its bbox
+// PIP uses only rings that touch the query point's bbox — avoids full geometry scan
+async function buildAOIRingIndex(feature, tickFn) {
+  const index = new RBush();
+  const items = [];
+  const geom  = feature.geometry || feature;
+
+  function addRings(polygonCoords) {
+    for (let r = 0; r < polygonCoords.length; r++) {
+      const ring = polygonCoords[r];
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [x, y] of ring) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+      items.push({ minX, minY, maxX, maxY, ring, isHole: r > 0 });
+    }
+  }
+
+  if (geom.type === 'Polygon') {
+    addRings(geom.coordinates);
+  } else if (geom.type === 'MultiPolygon') {
+    for (let i = 0; i < geom.coordinates.length; i++) {
+      addRings(geom.coordinates[i]);
+      if (i % 500 === 0 && tickFn) await tickFn();
+    }
+  }
+
+  index.load(items);
+  log(`AOI ring index built: ${items.length.toLocaleString()} rings indexed`, 'ok');
+  return index;
+}
+
+// Tiled PIP — tests a point against only the rings whose bbox contains the point
+function pointInAOITiled(px, py, ringIndex) {
+  const candidates = ringIndex.search({ minX: px, minY: py, maxX: px, maxY: py });
+  if (!candidates.length) return false;
+
+  // Ray casting on each candidate ring, tracking winding
+  let inside = false;
+  for (const { ring, isHole } of candidates) {
+    if (raycast(px, py, ring)) {
+      inside = isHole ? false : !inside;
+    }
+  }
+  return inside;
+}
+
+// Standard ray-casting algorithm
+function raycast(px, py, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > py) !== (yj > py) &&
+        px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Simplified version of AOI used only for turf.intersect (area calculations)
+// Tiled PIP handles the point-in-polygon at full resolution
+function getAOIForIntersect(feature) {
+  const verts = countVertices(feature);
+  if (verts <= 50000) return feature;
+  log(`Simplifying AOI for intersection area calculations (${verts.toLocaleString()} → ~50k verts)…`, 'info');
+  return simplifyToTarget(feature, 50000);
+}
+
+// Simplify a geometry to under maxVerts using escalating tolerances
+function simplifyToTarget(feature, maxVerts) {
+  const tolerances = [0.0001, 0.0003, 0.001, 0.003, 0.01, 0.03, 0.1];
+  for (const tol of tolerances) {
+    try {
+      const s = turf.simplify(feature, { tolerance: tol, highQuality: false });
+      const v = countVertices(s);
+      if (v <= maxVerts) {
+        log(`Simplified to ${v.toLocaleString()} vertices (tolerance ${tol})`, 'ok');
+        return s;
+      }
+    } catch {}
+  }
+  try { return turf.simplify(feature, { tolerance: 0.1, highQuality: false }); } catch {}
+  return feature;
+}
+
+function setAOI(feature, source, label) {
+  state.aoi          = feature;
+  state.aoiAnalysis  = feature;
+  state.aoiRingIndex = null;   // always clear — stale index is never usable
+  state.aoiSource    = source;
+
+  const verts = countVertices(feature);
+  const tier  = aoiComplexityTier(verts);
+  log(`AOI complexity: ${tier.label} (${verts.toLocaleString()} vertices)`, verts > AOI_VERTEX_WARN ? 'warn' : 'ok');
+
+  if (verts > 50000) {
+    document.getElementById('runBtn').disabled = true;
+    log('Building spatial ring index… Run button will enable when ready', 'info');
+
+    // Tag this build so if AOI changes again before it finishes, the stale result is discarded
+    const buildId    = Date.now() + Math.random();
+    state._ringBuildId = buildId;
+    const tick       = () => new Promise(r => setTimeout(r, 0));
+
+    buildAOIRingIndex(feature, tick).then(idx => {
+      if (state._ringBuildId !== buildId) {
+        log('Ring index build superseded — discarded', 'info');
+        return;  // AOI changed while building — don't apply
+      }
+      state.aoiRingIndex = idx;
+      if (state.layersReady) document.getElementById('runBtn').disabled = false;
+      log('Ring index ready — analysis enabled', 'ok');
     });
   }
 
-  // Update UI panel
-  document.getElementById("stateCount").textContent = stateCount;
-  document.getElementById("hospitalCount").textContent = hospitalCount;
-});
-</script>
+  if (source === 'upload') {
+    if (state.aoiLeafletLayer) state.map.removeLayer(state.aoiLeafletLayer);
+    state.aoiLeafletLayer = L.geoJSON(feature, {
+      style: { color: '#f2af00', weight: 2, fillColor: '#f2af00', fillOpacity: 0.12, dashArray: '6 4' }
+    }).addTo(state.map);
+    state.map.fitBounds(state.aoiLeafletLayer.getBounds(), { padding: [40, 40] });
+  } else {
+    try { state.map.fitBounds(state.drawnItems.getBounds(), { padding: [40, 40] }); } catch {}
+  }
 
+  const areaSqKm = areaKm2(feature).toLocaleString();
+  const meta     = label ? `${label} · ${areaSqKm} sq km` : `${areaSqKm} sq km · ${verts.toLocaleString()} vertices`;
+
+  const badge = document.getElementById('aoiBadge');
+  badge.textContent = source === 'upload' ? `✓ ${label}` : `✓ Polygon drawn · ${areaSqKm} sq km`;
+  badge.style.display = 'block';
+
+  document.getElementById('aoiConfirmMeta').textContent = meta;
+  document.getElementById('aoiConfirmBar').classList.add('visible');
+  const canRun = state.layersReady && (state.pointLayersReady !== false);
+  if (verts <= 50000) document.getElementById('runBtn').disabled = !canRun;
+  log(`AOI set (${source}) — ${areaSqKm} sq km`, 'ok');
+}
+
+function zoomToAOI() {
+  try {
+    if (state.aoiSource === 'draw') state.map.fitBounds(state.drawnItems.getBounds(), { padding: [40, 40] });
+    else if (state.aoiLeafletLayer) state.map.fitBounds(state.aoiLeafletLayer.getBounds(), { padding: [40, 40] });
+  } catch {}
+}
+
+function clearAOI() {
+  if (state.isDrawing) state.drawHandler.disable();
+  if (state.isEditing && state.editHandler) state.editHandler.disable();
+  state.drawnItems.clearLayers();
+  if (state.aoiLeafletLayer) { state.map.removeLayer(state.aoiLeafletLayer); state.aoiLeafletLayer = null; }
+  state.aoi = state.aoiSource = state.aoiAnalysis = state.aoiRingIndex = state._ringBuildId = null;
+  state.polyCounter = 0;
+
+  state.geoData.C = null;
+  document.getElementById('countC').textContent = 'AOI only';
+  state.geoData.D = null;
+  document.getElementById('countD').textContent = 'AOI only';
+
+  document.getElementById('aoiBadge').style.display          = 'none';
+  document.getElementById('aoiConfirmBar').classList.remove('visible');
+  document.getElementById('runBtn').disabled                  = true;
+  document.getElementById('drawHint').classList.remove('visible');
+  document.getElementById('drawModeIndicator').classList.remove('visible');
+  document.getElementById('btnStartDraw').style.display      = '';
+  document.getElementById('btnStartDraw').textContent        = '✏ Draw polygon on map';
+  document.getElementById('btnCancelDraw').style.display     = 'none';
+  document.getElementById('aoiManageSection').style.display  = 'none';
+  document.getElementById('drawnPolyList').innerHTML         = '';
+  document.getElementById('fileInput').value                  = '';
+  log('AOI cleared', 'info');
+}
+
+function showDrawMode(label) {
+  document.getElementById('drawModeLabel').textContent = label;
+  document.getElementById('drawModeIndicator').classList.add('visible');
+}
+function hideDrawMode() {
+  document.getElementById('drawModeIndicator').classList.remove('visible');
+  document.getElementById('drawHint').classList.remove('visible');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ANALYSIS — pure Turf client-side (data already loaded)
+// ═══════════════════════════════════════════════════════════
+async function runAnalysis() {
+  if (!state.aoi) return;
+
+  const analysisAOI = state.aoiAnalysis || state.aoi;
+  const verts = countVertices(analysisAOI);
+  const tier  = aoiComplexityTier(verts);
+
+  // Safety check — if a complex AOI's ring index is still building, refuse to run
+  // This prevents analysis running with a stale or missing index
+  if (verts > 50000 && !state.aoiRingIndex) {
+    log('⚠ Ring index is still building — please wait until "Ring index ready" appears before running analysis', 'warn');
+    alert('The spatial index for this complex AOI is still being built. Please wait for the "Ring index ready" message in the console before running analysis.');
+    return;
+  }
+
+  const useTiling = verts > 50000 && !!state.aoiRingIndex;
+
+  log(`Starting analysis — ${tier.label} AOI (${verts.toLocaleString()} vertices)${useTiling ? ' · tiled PIP enabled' : ''}`, 'info');
+  setStatus('loading');
+
+  const prog = document.getElementById('analysisProgress');
+  const fill = document.getElementById('analysisProgressFill');
+  const lbl  = document.getElementById('analysisProgressLabel');
+  prog.style.display = lbl.style.display = 'block';
+
+  const tick = () => new Promise(r => setTimeout(r, 0));
+
+  // AOI for intersect area calcs — simplify only if very large
+  const intersectAOI = getAOIForIntersect(analysisAOI);
+
+  // PIP function — tiled if index available, fallback to turf
+  const pointInAOI = (px, py) => {
+    if (useTiling) return pointInAOITiled(px, py, state.aoiRingIndex);
+    try {
+      return turf.booleanPointInPolygon(
+        { type:'Feature', geometry:{ type:'Point', coordinates:[px,py] }, properties:{} },
+        analysisAOI
+      );
+    } catch { return false; }
+  };
+
+
+  // Build set of state codes that the AOI intersects — use FULL AOI bbox, not simplified
+  // This is only used as a fast first-pass filter, not a definitive exclusion
+  const aoiBbox = turf.bbox(analysisAOI);
+  const aoiStateCodes = new Set();
+  if (state.geoData.LGA && _lgaIndex) {
+    const [minX, minY, maxX, maxY] = aoiBbox;
+    const lgaCandidates = _lgaIndex.search({ minX, minY, maxX, maxY });
+    for (const item of lgaCandidates) {
+      const f = item.feature;
+      try {
+        // Use full analysisAOI — never the simplified intersectAOI — for this check
+        if (turf.booleanIntersects(analysisAOI, f)) {
+          const sc = f.properties?.state_code_2021 || f.properties?.STATE_CODE_2021 || '';
+          if (sc) aoiStateCodes.add(String(sc));
+        }
+      } catch {}
+    }
+    log(`AOI intersects ${aoiStateCodes.size} state(s) — pre-filtering point data`, 'info');
+  }
+
+  // Combined pre-filter: bbox check + optional state tag check
+  // IMPORTANT: if state codes are unknown (tags not yet applied), always pass through
+  // The pre-filter is an optimisation ONLY — it must never incorrectly exclude points
+  const featureFilter = f => {
+    if (!f.geometry) return false;
+    // Quick bbox rejection
+    let pt;
+    try {
+      if      (f.geometry.type === 'Point')      pt = f.geometry.coordinates;
+      else if (f.geometry.type === 'MultiPoint') pt = f.geometry.coordinates[0];
+      else { pt = turf.centroid(f).geometry.coordinates; }
+    } catch { return true; }
+    if (pt[0] < aoiBbox[0] || pt[0] > aoiBbox[2] ||
+        pt[1] < aoiBbox[1] || pt[1] > aoiBbox[3]) return false;
+    // State pre-filter — only apply if tags exist AND we have a valid state set
+    // If tag is missing, pass through to exact PIP (never reject on missing tag)
+    if (aoiStateCodes.size > 0 && f._stateCode !== undefined) {
+      return aoiStateCodes.has(String(f._stateCode));
+    }
+    return true;
+  };
+
+  try {
+    const results = {};
+
+    // ── Layers A, B, E, F: pre-loaded, count points ──────────
+    for (let i = 0; i < 4; i++) {
+      const key = ['A', 'B', 'E', 'F'][i];
+      const cfg = CONFIG.layers[key];
+      const src = state.geoData[key];
+      if (!src) { log(`${cfg.name}: no data loaded, skipping`, 'warn'); continue; }
+
+      setProgress(fill, lbl, i*18 + 5, `Testing ${cfg.name} against AOI…`);
+      await tick();
+
+      let count = 0;
+      // Bbox pre-filter — fast rejection before expensive PIP
+      const candidates = src.features.filter(featureFilter);
+      const total = candidates.length;
+
+      if (total > 0) {
+        const geomTypes = [...new Set(candidates.slice(0,10).map(f => f.geometry?.type))];
+        log(`${cfg.name}: ${total.toLocaleString()} bbox candidates of ${src.features.length.toLocaleString()} total, geometry types: ${geomTypes.join(', ')}`, 'info');
+      }
+
+      for (let j = 0; j < total; j++) {
+        const f = candidates[j];
+        if (!f.geometry) continue;
+
+        // Extract a representative point — handles Point and MultiPoint
+        let testFeature = f;
+        if (f.geometry.type === 'MultiPoint') {
+          testFeature = { type: 'Feature', geometry: { type: 'Point', coordinates: f.geometry.coordinates[0] }, properties: f.properties };
+        } else if (f.geometry.type !== 'Point') {
+          try { testFeature = turf.centroid(f); } catch { continue; }
+        }
+
+        try {
+          if (pointInAOI(testFeature.geometry.coordinates[0], testFeature.geometry.coordinates[1])) {
+            const { lga: lgaName, state: stateName, stateCode, lgaCode } = findLGA(testFeature);
+            const key2 = lgaName;
+            if (!results[key2]) results[key2] = { A: 0, B: 0, E: 0, F: 0, C: 0, D: 0, state: stateName, stateCode, lgaCode };
+            results[key2][key]++;
+            count++;
+          }
+        } catch {}
+        if (j % 200 === 0) {
+          setProgress(fill, lbl, i*18 + 5 + Math.round((j/total)*15), `${cfg.name}: ${j.toLocaleString()} / ${total.toLocaleString()}…`);
+          await tick();
+        }
+      }
+      log(`${cfg.name}: ${count} of ${total.toLocaleString()} features inside AOI`, 'ok');
+    }
+
+    // ── Layer C: Population grid points — pre-loaded, sum pop field ──
+    // ── Layer C: Population — on-demand bbox fetch, paginated, sum pop field ──
+    setProgress(fill, lbl, 55, 'Fetching Population within AOI…');
+    await tick();
+
+    try {
+      const bbox    = turf.bbox(analysisAOI);
+      const bboxStr = `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`;
+      const pageSize = 2000;
+      let offset = 0, popPoints = [], exceeded = true;
+
+      while (exceeded) {
+        const url = `${CONFIG.layers.C.url}`
+          + `?outFields=pop&where=1%3D1&f=geojson`
+          + `&geometry=${encodeURIComponent(bboxStr)}`
+          + `&geometryType=esriGeometryEnvelope`
+          + `&spatialRel=esriSpatialRelIntersects`
+          + `&resultOffset=${offset}&resultRecordCount=${pageSize}`;
+
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+
+        const page = data.features || [];
+        popPoints = popPoints.concat(page);
+        // Continue if: service says exceeded, OR we got a full page (may be more records)
+        exceeded = data.properties?.exceededTransferLimit === true
+                || data.exceededTransferLimit === true
+                || page.length === pageSize;
+        offset += page.length;
+
+        setProgress(fill, lbl, Math.min(55 + Math.round(offset / 50), 84),
+          `Population: ${popPoints.length.toLocaleString()} points fetched…`);
+        await tick();
+        if (page.length === 0) break;
+      }
+
+      log(`Population: ${popPoints.length.toLocaleString()} points in bbox, running exact intersection…`, 'info');
+
+      let cellsInside = 0, totalPop = 0;
+      for (const f of popPoints) {
+        if (!f.geometry || f.geometry.type !== 'Point') continue;
+        try {
+          if (pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1])) {
+            const { lga: lgaName, state: stateName, stateCode, lgaCode } = findLGA(f);
+            if (!results[lgaName]) results[lgaName] = { A: 0, B: 0, E: 0, F: 0, C: 0, D: 0, state: stateName, stateCode, lgaCode };
+            const popVal = parseFloat(f.properties?.pop ?? f.properties?.Pop ?? f.properties?.POP ?? 0) || 0;
+            results[lgaName].C += popVal;
+            totalPop += popVal;
+            cellsInside++;
+          }
+        } catch {}
+      }
+
+      // Ceiling round all population values
+      for (const lga of Object.keys(results)) {
+        results[lga].C = Math.ceil(results[lga].C);
+      }
+
+      state.geoData.C = { type: 'FeatureCollection', features: popPoints.filter(f => {
+        try { return f.geometry && pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1]); } catch { return false; }
+      })};
+      document.getElementById('countC').textContent = `${Math.ceil(totalPop).toLocaleString()} pop`;
+      log(`Population: ${cellsInside.toLocaleString()} points inside AOI · total ${Math.ceil(totalPop).toLocaleString()}`, 'ok');
+
+    } catch(e) {
+      log(`Population fetch failed: ${e.message}`, 'error');
+    }
+
+    // ── Layer D: Address Points — bbox fetch + exact intersection, count ──
+    setProgress(fill, lbl, 92, 'Fetching Address Points within AOI…');
+    await tick();
+
+    try {
+      const bbox    = turf.bbox(analysisAOI);
+      const bboxStr = `${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]}`;
+      const pageSize = 2000;
+      let offset = 0, exceeded = true, addrPoints = [];
+
+      while (exceeded) {
+        const url = `${CONFIG.layers.D.urlBase}`
+          + `?outFields=*&where=1%3D1&f=geojson`
+          + `&geometry=${encodeURIComponent(bboxStr)}`
+          + `&geometryType=esriGeometryEnvelope`
+          + `&spatialRel=esriSpatialRelIntersects`
+          + `&resultOffset=${offset}&resultRecordCount=${pageSize}`;
+
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error.message);
+
+        const page = data.features || [];
+        addrPoints = addrPoints.concat(page);
+        // Continue if: service explicitly says exceeded, OR we got a full page (may be more)
+        exceeded = data.exceededTransferLimit === true || page.length === pageSize;
+        offset += page.length;
+        if (page.length === 0) break;
+
+        setProgress(fill, lbl, 92, `Address Points: ${addrPoints.length.toLocaleString()} fetched…`);
+        await tick();
+      }
+
+      log(`Address Points: ${addrPoints.length.toLocaleString()} in bbox, running exact intersection…`, 'info');
+
+      // Exact intersection + count per LGA
+      const cfg = CONFIG.layers.D;
+      let addrInside = 0;
+      for (const f of addrPoints) {
+        if (!f.geometry || f.geometry.type !== 'Point') continue;
+        try {
+          if (pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1])) {
+            const { lga: lgaName, state: stateName, stateCode, lgaCode } = findLGA(f);
+            if (!results[lgaName]) results[lgaName] = { A: 0, B: 0, E: 0, F: 0, C: 0, D: 0, state: stateName, stateCode, lgaCode };
+            results[lgaName].D++;
+            addrInside++;
+          }
+        } catch {}
+      }
+
+      state.geoData.D = { type: 'FeatureCollection', features: addrPoints.filter(f => {
+        try { return pointInAOI(f.geometry.coordinates[0], f.geometry.coordinates[1]); } catch { return false; }
+      })};
+      document.getElementById('countD').textContent = addrInside.toLocaleString();
+      log(`Address Points: ${addrInside.toLocaleString()} inside AOI`, 'ok');
+
+    } catch(e) {
+      log(`Address Points fetch failed: ${e.message}`, 'error');
+    }
+    await tick();
+
+    // ── Compute AOI ∩ LGA intersection area per LGA ──────────
+    setProgress(fill, lbl, 96, 'Calculating LGA intersection areas…');
+    await tick();
+
+    const lgaNames = Object.keys(results);
+    for (let i = 0; i < lgaNames.length; i++) {
+      const lgaName = lgaNames[i];
+      try {
+        const lgaFeature = state.geoData.LGA?.features.find(f => getLGAName(f) === lgaName);
+        if (!lgaFeature) { results[lgaName].lgaArea = 0; continue; }
+        const intersection = turf.intersect(intersectAOI, lgaFeature);
+        results[lgaName].lgaArea = intersection ? areaKm2(intersection) : 0;
+      } catch {
+        results[lgaName].lgaArea = 0;
+      }
+      // Yield every 3 LGAs to keep browser responsive
+      if (i % 3 === 0) {
+        setProgress(fill, lbl, 96 + Math.round((i / lgaNames.length) * 3), `Intersection areas: ${i+1} / ${lgaNames.length}…`);
+        await tick();
+      }
+    }
+
+    state.reportData = Object.entries(results).map(([lga, c]) => ({
+      lga,
+      stateName:     c.state     || '',
+      stateCode:     c.stateCode || '',
+      lgaCode:       c.lgaCode   || '',
+      lgaArea:       c.lgaArea   ?? 0,
+      countA:        c.A||0,
+      countB:        c.B||0,
+      countE:        c.E||0,
+      countHospital: (c.B||0) + (c.E||0),
+      countF:        c.F||0,
+      countC:        c.C||0,
+      countD:        c.D||0
+    }));
+
+    setProgress(fill, lbl, 100, 'Done');
+    log(`Report ready — ${state.reportData.length} LGAs`, 'ok');
+    setStatus('ready');
+
+    setTimeout(() => {
+      prog.style.display = lbl.style.display = 'none';
+      fill.style.width = '0%';
+      showReport();
+    }, 500);
+
+  } catch(e) {
+    log(`Analysis error: ${e.message}`, 'error');
+    setStatus('error');
+    prog.style.display = lbl.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// SPATIAL INDEX — fast LGA lookup via rbush bbox pre-filter
+// ═══════════════════════════════════════════════════════════
+let _lgaIndex  = null;  // rbush instance
+let _lgaItems  = [];    // parallel array of {feature, bbox}
+
+function buildLGAIndex(lgaData) {
+  try {
+    _lgaIndex = new RBush();
+    _lgaItems = lgaData.features.map((f, i) => {
+      const bb = turf.bbox(f);
+      return { minX: bb[0], minY: bb[1], maxX: bb[2], maxY: bb[3], idx: i };
+    });
+    _lgaIndex.load(_lgaItems);
+    log(`LGA spatial index built (${_lgaItems.length} entries)`, 'ok');
+  } catch(e) {
+    log(`LGA spatial index failed: ${e.message} — falling back to linear search`, 'warn');
+    _lgaIndex = null;
+  }
+}
+
+function findLGA(point) {
+  if (!state.geoData.LGA) return { lga: 'Unknown LGA', state: '', stateCode: '', lgaCode: '' };
+  const [px, py] = point.geometry.coordinates;
+
+  // Use spatial index to get candidate LGAs whose bbox contains the point
+  let candidates;
+  if (_lgaIndex) {
+    const hits = _lgaIndex.search({ minX: px, minY: py, maxX: px, maxY: py });
+    candidates = hits.map(h => state.geoData.LGA.features[h.idx]);
+  } else {
+    candidates = state.geoData.LGA.features;
+  }
+
+  for (const lga of candidates) {
+    try {
+      if (turf.booleanPointInPolygon(point, lga)) {
+        const props     = lga.properties || {};
+        const lgaName   = getLGAName(lga);
+        const stateName = props.state_name_2021 || props.STATE_NAME_2021 || props.state_name || props.STATE_NAME || '';
+        const stateCode = props.state_code_2021 || props.STATE_CODE_2021 || props.state_code || props.STATE_CODE || '';
+        const lgaCode   = props.lga_code_2024   || props.LGA_CODE_2024   || props.lga_code_2021 || props.LGA_CODE_2021 || props.lga_code || props.LGA_CODE || '';
+        return { lga: lgaName, state: stateName, stateCode, lgaCode };
+      }
+    } catch {}
+  }
+  return { lga: 'Outside LGA', state: '', stateCode: '99', lgaCode: '99999' };
+}
+
+function setProgress(fill, lbl, pct, text) { fill.style.width = pct+'%'; lbl.textContent = text; }
+
+// ═══════════════════════════════════════════════════════════
+// REPORT
+// ═══════════════════════════════════════════════════════════
+function showReport(historyEntry) {
+  // If called without an entry, save current reportData to history first
+  if (!historyEntry) {
+    if (!state.reportData?.length) { log('No features found in AOI', 'warn'); return; }
+    const ts = new Date();
+    const totalFeatures = state.reportData.reduce((s,r) => s + r.countA + r.countHospital + r.countF + r.countD, 0);
+    const totalPop      = state.reportData.reduce((s,r) => s + r.countC, 0);
+    const lgaCount      = state.reportData.length;
+    const id            = ts.getTime();
+    const aoiArea       = state.aoi ? areaKm2(state.aoi) : 0;
+    historyEntry = {
+      id,
+      timestamp:  ts,
+      label:      `${aoiArea} sq km · ${lgaCount} LGA${lgaCount !== 1 ? 's' : ''}`,
+      summary:    `${totalFeatures.toLocaleString()} features · pop ${Math.ceil(totalPop).toLocaleString()}`,
+      reportData: JSON.parse(JSON.stringify(state.reportData)),
+      aoi:        state.aoi ? JSON.parse(JSON.stringify(state.aoi)) : null,
+      aoiArea
+    };
+    state.sessionHistory.unshift(historyEntry);  // newest first
+    renderHistoryList();
+    log(`Report #${state.sessionHistory.length} saved to session history`, 'ok');
+  }
+
+  state.activeHistoryId = historyEntry.id;
+  renderHistoryList();  // update active highlight
+
+  const data = historyEntry.reportData;
+
+  const totalA = data.reduce((s,r) => s+r.countA, 0);
+  const totalB = data.reduce((s,r) => s+r.countB, 0);
+  const totalE = data.reduce((s,r) => s+r.countE, 0);
+  const totalH = data.reduce((s,r) => s+r.countHospital, 0);
+  const totalF = data.reduce((s,r) => s+r.countF, 0);
+  const totalC = data.reduce((s,r) => s+r.countC, 0);
+  const totalD = data.reduce((s,r) => s+r.countD, 0);
+  const max = Math.max(...data.map(r => Math.max(r.countA, r.countHospital, r.countF, r.countC, r.countD)));
+
+  document.getElementById('reportTimestamp').textContent =
+    historyEntry.timestamp.toLocaleString('en-AU', { dateStyle:'medium', timeStyle:'short' });
+
+  // Build structured rows matching CSV output: Total → States → LGAs grouped by state
+  const totalArea = Math.round(parseFloat(historyEntry.aoiArea || 0));
+
+  // Group by state
+  const byState = {};
+  for (const r of data) {
+    const s = r.stateName || 'Unknown';
+    if (!byState[s]) byState[s] = { stateCode: r.stateCode || '', lgas: [] };
+    byState[s].lgas.push(r);
+  }
+
+  // State subtotals
+  const stateRows = Object.entries(byState).map(([stateName, grp]) => ({
+    stateName,
+    stateCode:     grp.stateCode,
+    lgas:          grp.lgas,
+    lgaArea:       Math.round(grp.lgas.reduce((s,r) => s+(r.lgaArea||0), 0)),
+    countA:        grp.lgas.reduce((s,r) => s+r.countA, 0),
+    countHospital: grp.lgas.reduce((s,r) => s+r.countHospital, 0),
+    countB:        grp.lgas.reduce((s,r) => s+r.countB, 0),
+    countE:        grp.lgas.reduce((s,r) => s+r.countE, 0),
+    countF:        grp.lgas.reduce((s,r) => s+r.countF, 0),
+    countC:        grp.lgas.reduce((s,r) => s+r.countC, 0),
+    countD:        grp.lgas.reduce((s,r) => s+r.countD, 0)
+  })).sort((a,b) => (parseInt(a.stateCode)||0) - (parseInt(b.stateCode)||0));
+
+  const numCell = (val) =>
+    `<td class="num">${val != null ? val.toLocaleString() : '—'}</td>`;
+
+  // Total row
+  const totalRow = `<tr style="background:#dde3ea;font-weight:700;border-bottom:2px solid #ccd0d5">
+    <td style="color:#003E5A;font-family:Arial,monospace;font-size:10px;text-transform:uppercase">Total</td>
+    <td style="color:#666;font-size:10px;text-transform:uppercase"></td>
+    <td class="lga-name" style="font-weight:700">Total</td>
+    ${numCell(totalArea)}
+    ${numCell(totalA)}
+    ${numCell(totalH)}
+    ${numCell(totalB)}
+    ${numCell(totalE)}
+    ${numCell(totalF)}
+    ${numCell(totalC)}
+    ${numCell(totalD)}
+  </tr>`;
+
+  // State + LGA rows
+  // All state rows together (sorted by state code)
+  const allStateRows = stateRows.map(sr => `<tr style="background:#edf0f4;font-weight:600;border-top:1px solid #ccd0d5">
+      <td style="color:#003E5A;font-family:Arial,monospace;font-size:10px;text-transform:uppercase">State</td>
+      <td style="color:#666;font-size:11px">${sr.stateName}</td>
+      <td class="lga-name" style="font-weight:600">${sr.stateName}</td>
+      ${numCell(sr.lgaArea)}
+      ${numCell(sr.countA)}
+      ${numCell(sr.countHospital)}
+      ${numCell(sr.countB)}
+      ${numCell(sr.countE)}
+      ${numCell(sr.countF)}
+      ${numCell(sr.countC)}
+      ${numCell(sr.countD)}
+    </tr>`).join('');
+
+  // All LGA rows — grouped by state (state code order), sorted by LGA code within each state
+  const allLGARows = stateRows.map(sr =>
+    [...sr.lgas]
+      .sort((a,b) => (parseInt(a.lgaCode)||0) - (parseInt(b.lgaCode)||0))
+      .map(r => `<tr>
+        <td style="color:#888;font-family:Arial,monospace;font-size:10px;text-transform:uppercase">LGA</td>
+        <td style="color:#666;font-size:11px">${r.stateName}</td>
+        <td class="lga-name">${r.lga}</td>
+        ${numCell(r.lgaArea != null ? Math.round(r.lgaArea) : null)}
+        ${numCell(r.countA)}
+        ${numCell(r.countHospital)}
+        ${numCell(r.countB)}
+        ${numCell(r.countE)}
+        ${numCell(r.countF)}
+        ${numCell(r.countC)}
+        ${numCell(r.countD)}
+      </tr>`).join('')
+  ).join('');
+
+  document.getElementById('reportBody').innerHTML = `
+    <div class="report-meta">
+      <div class="meta-card"><div class="val">${totalArea.toLocaleString()} sq km</div><div class="lbl">AOI Area</div></div>
+      <div class="meta-card"><div class="val">${totalA.toLocaleString()}</div><div class="lbl">Aged Care Services</div></div>
+      <div class="meta-card"><div class="val">${totalH.toLocaleString()}</div><div class="lbl">Total Hospitals</div></div>
+      <div class="meta-card"><div class="val">${totalF.toLocaleString()}</div><div class="lbl">Major Power Stations</div></div>
+      <div class="meta-card"><div class="val">${totalC.toLocaleString()}</div><div class="lbl">Est. Population (2025)</div></div>
+      <div class="meta-card"><div class="val">${totalD.toLocaleString()}</div><div class="lbl">Address Points</div></div>
+    </div>
+    <div class="report-table-wrap"><table>
+      <thead><tr>
+        <th>Level</th>
+        <th>State</th>
+        <th style="text-align:left">Location</th>
+        <th>AOI Area (sq km)</th>
+        <th>Aged Care</th>
+        <th>Hospitals (total)</th>
+        <th>— Public</th>
+        <th>— Private</th>
+        <th>Power Stations</th>
+        <th>Population</th>
+        <th>Addresses</th>
+      </tr></thead>
+      <tbody>${totalRow}${allStateRows}${allLGARows}</tbody>
+    </table></div>`;
+
+  document.getElementById('reportModal').classList.add('open');
+}
+
+function renderHistoryList() {
+  const list = document.getElementById('historyList');
+  if (!state.sessionHistory.length) {
+    list.innerHTML = `<div style="color:var(--muted);font-size:11px;font-style:italic;text-align:center;margin-top:12px;line-height:1.5">
+      Run an analysis to<br>see results here
+    </div>`;
+    return;
+  }
+  list.innerHTML = state.sessionHistory.map((entry, i) => `
+    <div class="history-entry ${entry.id === state.activeHistoryId ? 'active' : ''}"
+         onclick="showReport(state.sessionHistory[${i}])">
+      <span class="h-num">#${state.sessionHistory.length - i}</span>
+      <div class="h-info">
+        <div class="h-time">${entry.timestamp.toLocaleTimeString('en-AU', { hour12: false })}</div>
+        <div class="h-summary">${entry.label} · ${entry.summary}</div>
+      </div>
+    </div>`).join('');
+}
+
+function sortReport(col) {
+  if (state.sortCol===col) state.sortAsc=!state.sortAsc;
+  else { state.sortCol=col; state.sortAsc=col==='lga'; }
+  // Re-render using the currently active history entry
+  const entry = state.sessionHistory.find(e => e.id === state.activeHistoryId);
+  if (entry) showReport(entry);
+}
+function closeReport() { document.getElementById('reportModal').classList.remove('open'); }
+
+// ═══════════════════════════════════════════════════════════
+// CSV EXPORT
+// ═══════════════════════════════════════════════════════════
+function exportCSV() {
+  const entry = state.sessionHistory.find(e => e.id === state.activeHistoryId);
+  if (!entry) return;
+
+  const data = entry.reportData;
+  const cols = ['Reporting Level','State','Location Name','AOI Area (sq km)','Aged Care','Hospitals (Total)','Public Hospitals','Private Hospitals','Power Stations','Est. Population (2025)','Address Points'];
+  const vals = (level, st, name, r, area='') => [level, st, name, area, r.countA, r.countHospital, r.countB, r.countE, r.countF, r.countC, r.countD];
+
+  // Grand total
+  const grand = {
+    countA:        data.reduce((s,r)=>s+r.countA,0),
+    countHospital: data.reduce((s,r)=>s+r.countHospital,0),
+    countB:        data.reduce((s,r)=>s+r.countB,0),
+    countE:        data.reduce((s,r)=>s+r.countE,0),
+    countF:        data.reduce((s,r)=>s+r.countF,0),
+    countC:        data.reduce((s,r)=>s+r.countC,0),
+    countD:        data.reduce((s,r)=>s+r.countD,0)
+  };
+
+  // Group LGAs by state, track stateCode per group
+  const byState = {};
+  for (const r of data) {
+    const s = r.stateName || 'Unknown';
+    if (!byState[s]) byState[s] = { stateCode: r.stateCode || '', lgas: [] };
+    byState[s].lgas.push(r);
+  }
+
+  // Build state subtotal objects
+  const stateRows = Object.entries(byState).map(([stateName, grp]) => ({
+    stateName,
+    stateCode: grp.stateCode,
+    lgas:      grp.lgas,
+    lgaArea:       Math.round(grp.lgas.reduce((s,r)=>s+(r.lgaArea||0),0)),
+    countA:        grp.lgas.reduce((s,r)=>s+r.countA,0),
+    countHospital: grp.lgas.reduce((s,r)=>s+r.countHospital,0),
+    countB:        grp.lgas.reduce((s,r)=>s+r.countB,0),
+    countE:        grp.lgas.reduce((s,r)=>s+r.countE,0),
+    countF:        grp.lgas.reduce((s,r)=>s+r.countF,0),
+    countC:        grp.lgas.reduce((s,r)=>s+r.countC,0),
+    countD:        grp.lgas.reduce((s,r)=>s+r.countD,0)
+  }));
+
+  // Sort states by state code numerically
+  stateRows.sort((a,b) => (parseInt(a.stateCode)||0) - (parseInt(b.stateCode)||0));
+
+  const rows = [cols];
+
+  // Total row
+  rows.push(vals('Total', 'Total', 'Total', grand, entry.aoiArea || ''));
+
+  // State rows sorted by state code
+  for (const sr of stateRows) {
+    rows.push(vals('State', sr.stateName, sr.stateName, sr, sr.lgaArea));
+  }
+
+  // LGA rows — grouped by state (state code order), sorted by LGA code within each state
+  for (const sr of stateRows) {
+    const sortedLgas = [...sr.lgas].sort((a,b) =>
+      (parseInt(a.lgaCode)||0) - (parseInt(b.lgaCode)||0)
+    );
+    for (const r of sortedLgas) {
+      rows.push(vals('LGA', r.stateName, r.lga, r, r.lgaArea));
+    }
+  }
+
+  const csv = rows.map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const ts  = entry.timestamp.toISOString().slice(0,10);
+  const a   = Object.assign(document.createElement('a'), {
+    href:     URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})),
+    download: `spatial_report_${ts}.csv`
+  });
+  a.click();
+  log('CSV exported', 'ok');
+}
+
+// ═══════════════════════════════════════════════════════════
+// AOI SHAPEFILE EXPORT
+// ═══════════════════════════════════════════════════════════
+async function exportAOI() {
+  const entry = state.sessionHistory.find(e => e.id === state.activeHistoryId);
+  if (!entry?.aoi) { log('No AOI available for this report', 'warn'); return; }
+
+  try {
+    const ts      = entry.timestamp.toISOString().slice(0,16).replace('T','_').replace(/:/g,'-');
+    const areaKm2Val = areaKm2(entry.aoi);
+    const geom    = entry.aoi.geometry;
+    const bbox    = turf.bbox(entry.aoi);
+
+    // Normalise to array of polygon coordinate arrays
+    const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+
+    // Count parts (rings) and points across all polygons
+    let numParts = 0, numPoints = 0;
+    for (const poly of polys) {
+      numParts  += poly.length;
+      for (const ring of poly) numPoints += ring.length;
+    }
+
+    // ── .shp ────────────────────────────────────────────────
+    // All sizes in BYTES throughout — no word conversion until the header fields
+    // File header:        100 bytes
+    // Record header:        8 bytes  (rec number + content length, big-endian)
+    // Shape type:           4 bytes
+    // Bounding box:        32 bytes  (4 × float64)
+    // NumParts + NumPoints: 8 bytes
+    // Parts array:    4 × numParts bytes
+    // Points array:  16 × numPoints bytes
+    const recContentBytes = 4 + 32 + 8 + (4 * numParts) + (16 * numPoints);
+    const shpTotalBytes   = 100 + 8 + recContentBytes;
+
+    const shpBuf = new ArrayBuffer(shpTotalBytes);
+    const shpV   = new DataView(shpBuf);
+
+    // File header (big-endian ints, little-endian ints mixed per spec)
+    shpV.setInt32(0,  9994,                    false); // file code (big)
+    shpV.setInt32(24, shpTotalBytes / 2,       false); // file length in 16-bit words (big)
+    shpV.setInt32(28, 1000,                    true);  // version (little)
+    shpV.setInt32(32, 5,                       true);  // shape type 5 = polygon (little)
+    shpV.setFloat64(36, bbox[0], true); // Xmin
+    shpV.setFloat64(44, bbox[1], true); // Ymin
+    shpV.setFloat64(52, bbox[2], true); // Xmax
+    shpV.setFloat64(60, bbox[3], true); // Ymax
+    // Zmin Zmax Mmin Mmax = 0
+    shpV.setFloat64(68, 0, true); shpV.setFloat64(76, 0, true);
+    shpV.setFloat64(84, 0, true); shpV.setFloat64(92, 0, true);
+
+    // Record header at byte 100
+    shpV.setInt32(100, 1,                       false); // record number 1 (big)
+    shpV.setInt32(104, recContentBytes / 2,     false); // content length in words (big)
+
+    // Record content at byte 108
+    let o = 108;
+    shpV.setInt32(o, 5,          true);  o += 4;  // shape type
+    shpV.setFloat64(o, bbox[0],  true);  o += 8;
+    shpV.setFloat64(o, bbox[1],  true);  o += 8;
+    shpV.setFloat64(o, bbox[2],  true);  o += 8;
+    shpV.setFloat64(o, bbox[3],  true);  o += 8;
+    shpV.setInt32(o, numParts,   true);  o += 4;
+    shpV.setInt32(o, numPoints,  true);  o += 4;
+
+    // Parts index (start point index of each ring)
+    let cumPts = 0;
+    for (const poly of polys) {
+      for (const ring of poly) {
+        shpV.setInt32(o, cumPts, true); o += 4;
+        cumPts += ring.length;
+      }
+    }
+
+    // XY pairs
+    for (const poly of polys) {
+      for (const ring of poly) {
+        for (const [x, y] of ring) {
+          shpV.setFloat64(o, x, true); o += 8;
+          shpV.setFloat64(o, y, true); o += 8;
+        }
+      }
+    }
+
+    // ── .shx ────────────────────────────────────────────────
+    const shxBuf = new ArrayBuffer(108); // 100-byte header + 8 bytes for one record
+    const shxV   = new DataView(shxBuf);
+    shxV.setInt32(0,  9994,                false);
+    shxV.setInt32(24, 54,                  false); // (100+8)/2 = 54 words
+    shxV.setInt32(28, 1000,                true);
+    shxV.setInt32(32, 5,                   true);
+    shxV.setFloat64(36, bbox[0], true); shxV.setFloat64(44, bbox[1], true);
+    shxV.setFloat64(52, bbox[2], true); shxV.setFloat64(60, bbox[3], true);
+    shxV.setFloat64(68, 0, true); shxV.setFloat64(76, 0, true);
+    shxV.setFloat64(84, 0, true); shxV.setFloat64(92, 0, true);
+    shxV.setInt32(100, 50,                 false); // offset to record = 100 bytes / 2 = 50 words
+    shxV.setInt32(104, recContentBytes/2,  false); // content length in words
+
+    // ── .dbf ────────────────────────────────────────────────
+    // 32-byte header + 32-byte field descriptor + 1 terminator + (1 + 16) record = 82 bytes
+    const dbfBuf = new ArrayBuffer(82);
+    const dbfU   = new Uint8Array(dbfBuf);
+    const dbfV   = new DataView(dbfBuf);
+    dbfV.setUint8(0, 3);                  // dBASE III
+    dbfV.setUint8(1, 25); dbfV.setUint8(2, 1); dbfV.setUint8(3, 1); // date
+    dbfV.setInt32(4,  1,   true);         // 1 record
+    dbfV.setInt16(8,  65,  true);         // header size: 32 + 32 + 1 = 65
+    dbfV.setInt16(10, 17,  true);         // record size: 1 flag + 16 field = 17
+    // Field descriptor at offset 32
+    'AREA_KM2'.split('').forEach((c,i) => dbfU[32+i] = c.charCodeAt(0));
+    dbfU[32+11] = 78;  // type 'N'
+    dbfU[32+16] = 16;  // field length
+    dbfU[32+17] = 4;   // decimals
+    dbfU[64]    = 0x0D; // terminator
+    dbfU[65]    = 0x20; // record not deleted
+    const areaStr = parseFloat(areaKm2Val).toFixed(4).padStart(16);
+    for (let i = 0; i < 16; i++) dbfU[66+i] = areaStr.charCodeAt(i);
+
+    // ── .prj ────────────────────────────────────────────────
+    const prj = 'GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",'
+              + 'SPHEROID["WGS_1984",6378137.0,298.257223563]],'
+              + 'PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]';
+
+    // ── Zip and download ────────────────────────────────────
+    const zip  = new JSZip();
+    const name = `aoi_${ts}`;
+    zip.file(`${name}.shp`, shpBuf);
+    zip.file(`${name}.shx`, shxBuf);
+    zip.file(`${name}.dbf`, dbfBuf);
+    zip.file(`${name}.prj`, prj);
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url  = URL.createObjectURL(blob);
+    Object.assign(document.createElement('a'), { href: url, download: `${name}.zip` }).click();
+    URL.revokeObjectURL(url);
+
+    log(`AOI exported as shapefile — ${areaKm2Val} sq km`, 'ok');
+  } catch(e) {
+    log(`AOI export failed: ${e.message}`, 'error');
+  }
+}
+function flattenToSingleFeature(g) {
+  if (g.type==='Feature') return g;
+  if (g.type==='FeatureCollection') {
+    if (!g.features.length) throw new Error('Empty feature collection');
+    return g.features.length===1 ? g.features[0] : turf.union(...g.features);
+  }
+  return { type:'Feature', geometry:g, properties:{} };
+}
+function countVertices(f) { return (JSON.stringify(f.geometry?.coordinates||[]).match(/\[/g)||[]).length; }
+function setStatus(s) { const p=document.getElementById('statusPill'); p.className='status-pill '+s; p.textContent=s.toUpperCase(); }
+function log(msg, type='info') {
+  const el=document.getElementById('logScroll');
+  const ts=new Date().toLocaleTimeString('en-AU',{hour12:false});
+  const d=document.createElement('div'); d.className=`log-entry ${type}`;
+  d.innerHTML=`<span class="ts">${ts}</span>${msg}`; el.appendChild(d); el.scrollTop=el.scrollHeight;
+  // Show badge on toggle button if console is closed and message is warn/error
+  if (!document.getElementById('consoleFloat').classList.contains('open') && (type==='warn'||type==='error')) {
+    document.getElementById('logBadge').classList.add('visible');
+  }
+}
+
+function toggleConsole() {
+  const panel = document.getElementById('consoleFloat');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    document.getElementById('logBadge').classList.remove('visible');
+    // Scroll to bottom
+    const scroll = document.getElementById('logScroll');
+    scroll.scrollTop = scroll.scrollHeight;
+  }
+}
+
+function clearConsole() {
+  document.getElementById('logScroll').innerHTML = '';
+  document.getElementById('logBadge').classList.remove('visible');
+}
+
+// ═══════════════════════════════════════════════════════════
+// LGA SEARCH
+// ═══════════════════════════════════════════════════════════
+let _lgaSearchIndex  = null;  // built lazily on first search
+let _lgaSearchActive = -1;    // keyboard nav index
+let _lgaSearchMatches = [];   // current result set
+
+function buildLGASearchIndex() {
+  if (!state.geoData.LGA) return [];
+  return state.geoData.LGA.features.map(f => ({
+    name:      getLGAName(f),
+    state:     f.properties?.state_name_2021 || f.properties?.STATE_NAME_2021 || '',
+    feature:   f
+  })).sort((a,b) => a.name.localeCompare(b.name));
+}
+
+function onLGASearch(val) {
+  const results = document.getElementById('lgaSearchResults');
+  const clear   = document.getElementById('lgaSearchClear');
+  clear.style.display = val ? '' : 'none';
+  _lgaSearchActive = -1;
+
+  if (!val.trim()) { results.classList.remove('open'); return; }
+
+  if (!_lgaSearchIndex) _lgaSearchIndex = buildLGASearchIndex();
+
+  const q       = val.toLowerCase();
+  const matches = _lgaSearchIndex.filter(e => e.name.toLowerCase().includes(q)).slice(0, 20);
+
+  if (!matches.length) { results.classList.remove('open'); return; }
+
+  results.innerHTML = matches.map((m, i) => `
+    <div class="lga-result-item" data-idx="${i}"
+         onmousedown="selectLGAResult(${i})"
+         onmouseover="setLGAActive(${i})">
+      <span>${highlightMatch(m.name, val)}</span>
+      <span class="lga-result-state">${m.state}</span>
+    </div>`).join('');
+
+  _lgaSearchMatches = matches;
+  results.classList.add('open');
+}
+
+function highlightMatch(name, query) {
+  const i = name.toLowerCase().indexOf(query.toLowerCase());
+  if (i < 0) return name;
+  return `${name.slice(0,i)}<b>${name.slice(i, i+query.length)}</b>${name.slice(i+query.length)}`;
+}
+
+function setLGAActive(idx) {
+  _lgaSearchActive = idx;
+  document.querySelectorAll('.lga-result-item').forEach((el, i) =>
+    el.classList.toggle('active', i === idx)
+  );
+}
+
+function onLGASearchKey(e) {
+  const results = document.getElementById('lgaSearchResults');
+  const items   = document.querySelectorAll('.lga-result-item');
+  if (!results.classList.contains('open')) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    setLGAActive(Math.min(_lgaSearchActive + 1, items.length - 1));
+    items[_lgaSearchActive]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    setLGAActive(Math.max(_lgaSearchActive - 1, 0));
+    items[_lgaSearchActive]?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (_lgaSearchActive >= 0) selectLGAResult(_lgaSearchActive);
+    else if (_lgaSearchMatches.length) selectLGAResult(0);
+  } else if (e.key === 'Escape') {
+    clearLGASearch();
+  }
+}
+
+function selectLGAResult(idx) {
+  const match = _lgaSearchMatches[idx];
+  if (!match) return;
+
+  try {
+    const bounds = L.geoJSON(match.feature).getBounds();
+    state.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+
+    const flash = L.geoJSON(match.feature, {
+      style: { color: '#2d7592', weight: 2.5, fillColor: '#2d7592', fillOpacity: 0.2, dashArray: null }
+    }).addTo(state.map);
+    setTimeout(() => state.map.removeLayer(flash), 2000);
+
+    log(`Zoomed to LGA: ${match.name} (${match.state})`, 'ok');
+  } catch(e) {
+    log(`LGA zoom failed: ${e.message}`, 'error');
+  }
+
+  document.getElementById('lgaSearchInput').value = match.name;
+  document.getElementById('lgaSearchClear').style.display = '';
+  document.getElementById('lgaSearchResults').classList.remove('open');
+  _lgaSearchActive = -1;
+}
+
+function clearLGASearch() {
+  document.getElementById('lgaSearchInput').value = '';
+  document.getElementById('lgaSearchClear').style.display = 'none';
+  document.getElementById('lgaSearchResults').classList.remove('open');
+  _lgaSearchActive  = -1;
+  _lgaSearchMatches = [];
+}
+
+// Close results when clicking outside
+document.addEventListener('click', e => {
+  if (!document.getElementById('lgaSearchWrap')?.contains(e.target)) {
+    document.getElementById('lgaSearchResults')?.classList.remove('open');
+  }
+});
+window.addEventListener('load', initMap);
+</script>
 </body>
 </html>
