@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Australia state selector</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <!-- Leaflet.draw CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+  />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""
+></script>
+
+<!-- Leaflet.draw JS -->
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+<!-- Turf.js for geometry intersection -->
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+
+<script>
+// --- 1. Basic map setup over Australia ---
+var map = L.map('map').setView([-25, 135], 4);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+// --- 2. Simple GeoJSON for Australian states/territories ---
+// This is just an example; replace with a proper GeoJSON if you have one.
+var ausStatesGeoJSON = {
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "name": "New South Wales" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[141,-28],[153.6,-28],[153.6,-37.5],[141,-37.5],[141,-28]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Victoria" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[141,-34],[150,-34],[150,-39.2],[141,-39.2],[141,-34]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Queensland" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[138,-10],[154,-10],[154,-29],[138,-29],[138,-10]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "South Australia" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[129,-26],[141,-26],[141,-38],[129,-38],[129,-26]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Western Australia" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[112,-14],[129,-14],[129,-35],[112,-35],[112,-14]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Tasmania" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[144,-40],[149,-40],[149,-44],[144,-44],[144,-40]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Northern Territory" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[129,-11],[138,-11],[138,-26],[129,-26],[129,-11]]]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": { "name": "Australian Capital Territory" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[148.8,-35.1],[149.4,-35.1],[149.4,-35.8],[148.8,-35.8],[148.8,-35.1]]]
+      }
+    }
+  ]
+};
+
+// Add states to map
+var statesLayer = L.geoJSON(ausStatesGeoJSON, {
+  style: {
+    color: '#555',
+    weight: 1,
+    fillColor: '#3388ff',
+    fillOpacity: 0.2
+  },
+  onEachFeature: function (feature, layer) {
+    layer.bindPopup(feature.properties.name);
+  }
+}).addTo(map);
+
+// --- 3. Drawing control setup ---
+var drawnItems = new L.FeatureGroup();
+map.addLayer(drawnItems);
+
+var drawControl = new L.Control.Draw({
+  draw: {
+    polyline: false,
+    rectangle: true,
+    polygon: true,
+    circle: false,
+    marker: false,
+    circlemarker: false
+  },
+  edit: {
+    featureGroup: drawnItems
+  }
+});
+map.addControl(drawControl);
+
+// --- 4. When a shape is drawn, count intersecting states ---
+map.on(L.Draw.Event.CREATED, function (e) {
+  drawnItems.clearLayers(); // keep only one shape at a time
+  var layer = e.layer;
+  drawnItems.addLayer(layer);
+
+  var drawnGeoJSON = layer.toGeoJSON();
+  var selectedCount = 0;
+  var selectedNames = [];
+
+  statesLayer.eachLayer(function (stateLayer) {
+    var stateGeoJSON = stateLayer.toGeoJSON();
+    // Use Turf to test intersection
+    var intersects = turf.booleanIntersects(drawnGeoJSON, stateGeoJSON);
+    if (intersects) {
+      selectedCount++;
+      selectedNames.push(stateGeoJSON.properties.name);
+      stateLayer.setStyle({ fillColor: '#ff7800', fillOpacity: 0.5 });
+    } else {
+      stateLayer.setStyle({ fillColor: '#3388ff', fillOpacity: 0.2 });
+    }
+  });
+
+  alert('You selected ' + selectedCount + ' state(s):\n' + selectedNames.join(', '));
+});
+</script>
+</body>
+</html>
